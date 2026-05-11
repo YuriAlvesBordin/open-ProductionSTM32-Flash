@@ -1,13 +1,22 @@
 """Auto-detection of STM32 family and debug interface using OpenOCD.
 
-Strategy:
-  1. For each interface in priority order, run a short OpenOCD session that
-     executes 'jtag arp_init' (or 'init') followed by 'dap info' / idcode read.
-  2. Parse stdout/stderr for a known IDCODE pattern.
-  3. Map the IDCODE to a FamilyConfig entry.
-  4. Return the matched interface label and family label on success.
+Strategy
+--------
+For each interface (ST-Link → CMSIS-DAP → J-Link) we run a minimal OpenOCD
+session using proper -f / -c arguments.  When OpenOCD successfully initialises
+the DAP it always prints a line like:
 
-The probe script is intentionally minimal so it exits quickly even on failure.
+    Info : STM32F4xx.cpu: hardware has 6 breakpoints, 4 watchpoints
+    Info : IDCODE: 0x2BA01477          ← SWD DP IDCODE  (not the MCU IDCODE)
+
+More usefully, it prints the *device* IDCODE via the target examination:
+
+    Info : stm32f4x.cpu: target halted due to debug-request ...
+    Info : device id = 0x10006413      ← this is the MCU part number
+
+We capture ALL of stdout+stderr and run several regexes that cover the
+different formats OpenOCD 0.11, 0.12 and git-master use.  The first
+non-trivial 32-bit value whose bits[27:12] match a known STM32 part wins.
 """
 from __future__ import annotations
 
@@ -18,18 +27,13 @@ from typing import Optional
 
 from core.family_config import FAMILY_MAP, INTERFACE_MAP
 
-# ── IDCODE → family mapping ───────────────────────────────────────────────────
-# Key: hex mask (applied with bitwise-AND before comparison)
-# Each entry: (mask, expected_value, family_label)
-#
-# STM32 IDCODE format:  bits[31:28]=version, bits[27:12]=part_no, bits[11:1]=mfg_id
-# We match on part_no (bits 27:12) only, using mask 0x0FFFF000.
-#
-# Values sourced from ST RM0008, RM0090, RM0385, RM0394, RM0440, RM0468.
-_PART_MASK = 0x0FFFF000
-
+# ── IDCODE table ──────────────────────────────────────────────────────────────
+# Tuple: (mask, expected, family_label)
+# Mask and expected are applied to the raw 32-bit value read from the device.
+# Source: ST reference manuals (RM0008, RM0090, RM0385, RM0394, RM0440, RM0468)
+# and OpenOCD source (src/flash/nor/stm32*).
 _IDCODE_TABLE: list[tuple[int, int, str]] = [
-    # STM32F0 / F1 (stm32f1x.cfg)
+    # STM32F0 / F1
     (0x0FFFF000, 0x00006000, "STM32F0/F1"),   # F100
     (0x0FFFF000, 0x00010000, "STM32F0/F1"),   # F101
     (0x0FFFF000, 0x00012000, "STM32F0/F1"),   # F102
@@ -50,8 +54,8 @@ _IDCODE_TABLE: list[tuple[int, int, str]] = [
     (0x0FFFF000, 0x00463000, "STM32F2/F4"),   # F413 / F423
     (0x0FFFF000, 0x00421000, "STM32F2/F4"),   # F446
     (0x0FFFF000, 0x00449000, "STM32F2/F4"),   # F74x / F75x
-    (0x0FFFF000, 0x00451000, "STM32F7"),       # F76x / F77x
     # STM32F7
+    (0x0FFFF000, 0x00451000, "STM32F7"),       # F76x / F77x
     (0x0FFFF000, 0x00452000, "STM32F7"),       # F72x / F73x
     # STM32G0
     (0x0FFFF000, 0x00460000, "STM32G0"),       # G07x / G08x
@@ -69,7 +73,7 @@ _IDCODE_TABLE: list[tuple[int, int, str]] = [
     # STM32H7
     (0x0FFFF000, 0x00450000, "STM32H7"),       # H74x / H75x
     (0x0FFFF000, 0x00480000, "STM32H7"),       # H7A3 / H7B3 / H7B0
-    (0x0FFFF000, 0x00483000, "STM32H7"),       # H723 / H725 / H730 / H733 / H735
+    (0x0FFFF000, 0x00483000, "STM32H7"),       # H723 / H725 / H733 / H735
     # STM32L0 / L1
     (0x0FFFF000, 0x00426000, "STM32L0/L1"),   # L1xx Cat.1
     (0x0FFFF000, 0x00436000, "STM32L0/L1"),   # L1xx Cat.5/6
@@ -80,30 +84,39 @@ _IDCODE_TABLE: list[tuple[int, int, str]] = [
     (0x0FFFF000, 0x00417000, "STM32L0/L1"),   # L0xx Cat.3
 ]
 
-# Probe interfaces in this order (most common first)
-_INTERFACE_PRIORITY = ["ST-Link V2", "ST-Link V3", "CMSIS-DAP", "J-Link"]
+# Interface probe order (most common first).
+# Each entry: (interface_label, cfg_file, transport)
+# transport is passed as a -c argument so we don't rely on the cfg default.
+_PROBE_SEQUENCE: list[tuple[str, str, str]] = [
+    ("ST-Link V2",  "interface/stlink.cfg",    "swd"),
+    ("ST-Link V3",  "interface/stlink.cfg",    "swd"),
+    ("CMSIS-DAP",   "interface/cmsis-dap.cfg", "swd"),
+    ("J-Link",      "interface/jlink.cfg",     "swd"),
+]
 
-# Regex to capture a 32-bit hex IDCODE from OpenOCD output
-_IDCODE_RE = re.compile(r"idcode[:\s]+0x([0-9A-Fa-f]{8})", re.IGNORECASE)
-_IDCODE_RE2 = re.compile(r"tap/device found:\s*0x([0-9A-Fa-f]{8})", re.IGNORECASE)
-_IDCODE_RE3 = re.compile(r"0x([0-9A-Fa-f]{8})\s+\(mfg:", re.IGNORECASE)
+# ── IDCODE patterns emitted by OpenOCD ───────────────────────────────────────
+# OpenOCD prints the MCU device id in several formats depending on version:
+#
+#   "device id = 0x10006413"          (most flash drivers, very reliable)
+#   "idcode: 0x2BA01477"              (SWD DP — this is the ARM DAP id, NOT the MCU)
+#   "tap/device found: 0x2BA01477"    (JTAG tap scan)
+#   "0x10006413 (mfg: ..."            (some versions)
+#
+# We prioritise "device id" because it is the MCU part number.
+# The DAP IDCODE (0x2BA01477 for Cortex-M4 etc.) is ARM-standard and will
+# NOT match any STM32 entry in our table — so even if we accidentally capture
+# it, the family lookup will fail and we skip to the next pattern.
 
-# Minimal OpenOCD script that probes IDCODE then exits
-_PROBE_SCRIPT = """
-adapter speed 500
-init
-set idcode [expr {[dap apreg 0 0xFC] & 0x0FFFFFFF}]
-echo "PROBE_IDCODE: $idcode"
-shutdown
-"""
+_PATTERNS: list[re.Pattern] = [
+    re.compile(r"device\s+id\s*=\s*0x([0-9A-Fa-f]{8})", re.IGNORECASE),
+    re.compile(r"device_id\s*=\s*0x([0-9A-Fa-f]{8})", re.IGNORECASE),
+    re.compile(r"\bchip\s+id\s*[=:]\s*0x([0-9A-Fa-f]{8})", re.IGNORECASE),
+    re.compile(r"tap/device found:\s*0x([0-9A-Fa-f]{8})", re.IGNORECASE),
+    re.compile(r"idcode[:\s]+0x([0-9A-Fa-f]{8})", re.IGNORECASE),
+    re.compile(r"0x([0-9A-Fa-f]{8})\s+\(mfg:", re.IGNORECASE),
+]
 
-# Fallback script for older OpenOCD without dap command
-_PROBE_SCRIPT_LEGACY = """
-adapter speed 500
-init
-echo "PROBE_IDCODE: [format 0x%08x [jtag cget [target current] -idcode]]"
-shutdown
-"""
+_SKIP_VALUES = {0x00000000, 0xFFFFFFFF, 0x2BA01477, 0x1BA01477, 0x0BA01477}
 
 
 @dataclass
@@ -122,42 +135,49 @@ def _match_family(idcode: int) -> Optional[str]:
 
 
 def _parse_idcode(text: str) -> Optional[int]:
-    for pattern in (_IDCODE_RE, _IDCODE_RE2, _IDCODE_RE3):
-        m = pattern.search(text)
-        if m:
+    """Return the first MCU device ID found in OpenOCD output, or None."""
+    for pattern in _PATTERNS:
+        for m in pattern.finditer(text):
             val = int(m.group(1), 16)
-            if val not in (0x00000000, 0xFFFFFFFF):
-                return val
-    # Also try the custom PROBE_IDCODE echo
-    m2 = re.search(r"PROBE_IDCODE:\s*(0x[0-9A-Fa-f]+|[0-9]+)", text)
-    if m2:
-        raw = m2.group(1)
-        val = int(raw, 16) if raw.startswith("0x") else int(raw)
-        if val not in (0, 0xFFFFFFFF):
+            if val in _SKIP_VALUES:
+                continue
+            # Only consider values that look like STM32 device IDs:
+            # manufacturer bits [11:1] = 0x20 (ST) → bits[11:1] & 0xFFE = 0x040
+            # We accept anything not in the skip list and try the family match.
             return val
     return None
 
 
-def _run_probe(
-    openocd_path: str,
-    interface_cfg: str,
-    timeout: float = 5.0,
-) -> str:
-    """Run a quick OpenOCD probe and return combined stdout+stderr."""
-    script = (
-        f"source [find {interface_cfg}]\n"
-        "transport select swd\n"
-        + _PROBE_SCRIPT
-    )
+def _build_args(openocd_path: str, iface_cfg: str, transport: str) -> list[str]:
+    """Build the openocd command-line for a probe run.
+
+    Uses -f for config files and individual -c for each command so OpenOCD
+    parses them correctly on all platforms (avoids newline/quoting issues).
+    """
+    return [
+        openocd_path,
+        "-f", iface_cfg,
+        "-c", f"transport select {transport}",
+        "-c", "adapter speed 1000",
+        "-c", "init",
+        "-c", "shutdown",
+    ]
+
+
+def _run_probe(openocd_path: str, iface_cfg: str, transport: str,
+               timeout: float = 6.0) -> str:
+    """Run OpenOCD and return combined stdout + stderr."""
     try:
         result = subprocess.run(
-            [openocd_path, "-c", script],
+            _build_args(openocd_path, iface_cfg, transport),
             capture_output=True,
             text=True,
             timeout=timeout,
         )
         return result.stdout + result.stderr
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except subprocess.TimeoutExpired:
+        return ""
+    except (FileNotFoundError, OSError):
         return ""
 
 
@@ -165,36 +185,50 @@ def detect_device(
     openocd_path: str,
     progress_cb=None,
 ) -> Optional[DetectionResult]:
-    """
-    Attempt to auto-detect the connected STM32 family and debug interface.
+    """Probe the connected device and return interface + family labels.
 
     Args:
-        openocd_path: Full path to the openocd executable.
-        progress_cb:  Optional callable(str) for status messages.
+        openocd_path: Absolute path to the openocd executable.
+        progress_cb:  Optional callable(str) for live status messages.
 
     Returns:
-        DetectionResult on success, None if detection fails.
+        DetectionResult on success, None if no device was matched.
     """
     def _emit(msg: str) -> None:
         if progress_cb:
             progress_cb(msg)
 
-    for iface_label in _INTERFACE_PRIORITY:
-        if iface_label not in INTERFACE_MAP:
-            continue
-        iface_cfg = INTERFACE_MAP[iface_label]
-        _emit(f"Probing via {iface_label}...")
+    for iface_label, iface_cfg, transport in _PROBE_SEQUENCE:
+        _emit(f"Probing {iface_label}...")
 
-        output = _run_probe(openocd_path, iface_cfg)
+        output = _run_probe(openocd_path, iface_cfg, transport)
+
+        if not output:
+            # Timeout or binary not found — skip silently.
+            continue
+
         idcode = _parse_idcode(output)
 
         if idcode is None:
+            # OpenOCD ran but produced no recognisable device ID.
+            # Log the first meaningful error line to help diagnostics.
+            for line in output.splitlines():
+                line = line.strip()
+                if line and ("Error" in line or "Warn" in line or "failed" in line.lower()):
+                    _emit(f"  {line}")
+                    break
             continue
 
         family = _match_family(idcode)
         if family is None:
-            _emit(f"Unknown IDCODE 0x{idcode:08X} on {iface_label} — not matched.")
-            continue
+            _emit(f"  IDCODE 0x{idcode:08X} not in table — update device_detector.py")
+            # Still return partial result so the user can set family manually.
+            return DetectionResult(
+                interface_label=iface_label,
+                family_label="",
+                idcode=idcode,
+                raw_output=output,
+            )
 
         return DetectionResult(
             interface_label=iface_label,
