@@ -27,7 +27,6 @@ info "[1/4] Checking Python..."
 PYTHON_BIN=""
 for candidate in python3 python3.13 python3.12 python3.11 python3.10 python; do
     if command -v "$candidate" &>/dev/null; then
-        ver=$("$candidate" -c 'import sys; print(sys.version_info[:2])')
         major=$("$candidate" -c 'import sys; print(sys.version_info.major)')
         minor=$("$candidate" -c 'import sys; print(sys.version_info.minor)')
         if [ "$major" -ge 3 ] && [ "$minor" -ge 10 ]; then
@@ -58,7 +57,7 @@ source .venv/bin/activate
 info "[3/4] Installing dependencies..."
 
 pip install --upgrade pip --quiet
-pip install -r requirements.txt
+pip install -r requirements.txt --quiet
 ok "Dependencies installed."
 
 # ── [4/4] Done ────────────────────────────────────────────────────────────────
@@ -76,16 +75,45 @@ echo
 read -r -p "  Build a standalone executable with Nuitka? [y/N]: " BUILD_EXE
 
 case "$BUILD_EXE" in
-    [Yy]|[Yy][Ee][Ss])
-        ;;
+    [Yy]|[Yy][Ee][Ss]) ;;
     *)
         echo
-        warn "Skipping build. Run './install.sh' again or use 'python build.py' later."
+        warn "Skipping build. Run './install.sh' again to build later."
         echo
         exit 0
         ;;
 esac
 
+# ── Linux: check patchelf (required by Nuitka --onefile) ────────────────────────
+UNAME_OS=$(uname -s)
+
+if [ "$UNAME_OS" = "Linux" ] && ! command -v patchelf &>/dev/null; then
+    echo
+    warn "patchelf is not installed. Nuitka requires it for --onefile builds on Linux."
+    read -r -p "  Install patchelf now? Requires sudo. [y/N]: " INSTALL_PATCHELF
+    case "$INSTALL_PATCHELF" in
+        [Yy]|[Yy][Ee][Ss])
+            # Detect package manager
+            if command -v apt-get &>/dev/null; then
+                sudo apt-get install -y patchelf
+            elif command -v dnf &>/dev/null; then
+                sudo dnf install -y patchelf
+            elif command -v pacman &>/dev/null; then
+                sudo pacman -S --noconfirm patchelf
+            elif command -v zypper &>/dev/null; then
+                sudo zypper install -y patchelf
+            else
+                die "Could not detect a supported package manager (apt/dnf/pacman/zypper).\n     Install patchelf manually and run this script again."
+            fi
+            ok "patchelf installed."
+            ;;
+        *)
+            die "patchelf is required to build. Install it with:\n     sudo apt install patchelf   (Debian/Ubuntu)\n     sudo dnf install patchelf   (Fedora)\n     sudo pacman -S patchelf     (Arch)"
+            ;;
+    esac
+fi
+
+# ── Install Nuitka and build ──────────────────────────────────────────────────────
 info "Installing Nuitka..."
 pip install nuitka --quiet
 ok "Nuitka installed."
@@ -94,8 +122,6 @@ echo
 info "Building standalone executable... (this may take a few minutes)"
 echo
 
-# Detect OS for icon / extra flags
-UNAME_OS=$(uname -s)
 EXTRA_FLAGS=""
 if [ "$UNAME_OS" = "Darwin" ]; then
     EXTRA_FLAGS="--macos-app-name=STM32Flash"
