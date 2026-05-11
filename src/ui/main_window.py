@@ -4,6 +4,7 @@ Tabs: FLASH | SETTINGS
 - Settings tab asks for password on every click (skipped when password is empty).
 - RDP level selection lives in Settings.
 - Usage statistics are displayed on the Flash tab.
+- Auto-detect button probes the connected device for family + interface.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -33,8 +34,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import QEvent
 
+from core.device_detector import detect_device
 from core.family_config import get_families, get_interfaces, get_config, get_interface_cfg
 from core.flash_worker import FlashWorker
 from ui.settings_tab import SettingsTab
@@ -166,21 +167,45 @@ QLabel {{ background: transparent; }}
 """
 
 
-class _PasswordGateTabBar(QTabBar):
-    """Tab bar that intercepts clicks on the Settings tab and
-    asks for a password before switching, unless the password is empty."""
+# ── detector thread ───────────────────────────────────────────────────────────
 
+class _DetectorThread(QThread):
+    progress  = pyqtSignal(str)          # status messages
+    detected  = pyqtSignal(str, str, int)  # iface_label, family_label, idcode
+    not_found = pyqtSignal()
+
+    def __init__(self, openocd_path: str):
+        super().__init__()
+        self._openocd = openocd_path
+
+    def run(self) -> None:
+        result = detect_device(
+            self._openocd,
+            progress_cb=lambda msg: self.progress.emit(msg),
+        )
+        if result:
+            self.detected.emit(
+                result.interface_label,
+                result.family_label,
+                result.idcode,
+            )
+        else:
+            self.not_found.emit()
+
+
+# ── password-gate tab bar ───────────────────────────────────────────────────────
+
+class _PasswordGateTabBar(QTabBar):
     SETTINGS_INDEX = 1
 
     def __init__(self, main_window: "MainWindow"):
         super().__init__()
         self._main = main_window
 
-    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+    def mousePressEvent(self, event) -> None:
         idx = self.tabAt(event.pos())
         if idx == self.SETTINGS_INDEX:
             if self._main._settings_tab.password_is_empty():
-                # No password set — switch freely
                 super().mousePressEvent(event)
             else:
                 dlg = PasswordDialog(
@@ -190,10 +215,11 @@ class _PasswordGateTabBar(QTabBar):
                 if dlg.exec() == QDialog.DialogCode.Accepted:
                     self._main._settings_tab.log("Settings accessed.", "info")
                     super().mousePressEvent(event)
-                # Rejected: do nothing, stay on current tab
         else:
             super().mousePressEvent(event)
 
+
+# ── main window ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -202,10 +228,11 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(700, 560)
         self._firmware_path = ""
         self._worker: Optional[FlashWorker] = None
+        self._detector: Optional[_DetectorThread] = None
         self.setStyleSheet(APP_STYLESHEET)
         self._build_ui()
 
-    # ── UI construction ───────────────────────────────────────────────────────
+    # ── construction ────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -233,11 +260,10 @@ class MainWindow(QMainWindow):
         hl.addWidget(ver_lbl)
         root.addWidget(header)
 
-        # Tabs with password gate
+        # Tabs
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)
-        gate_bar = _PasswordGateTabBar(self)
-        self._tabs.setTabBar(gate_bar)
+        self._tabs.setTabBar(_PasswordGateTabBar(self))
         root.addWidget(self._tabs)
 
         self._tab_flash = QWidget()
@@ -259,29 +285,51 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
         layout.setContentsMargins(12, 12, 12, 12)
 
-        # ── Target ──
+        # ── Target group ──
         grp_target = QGroupBox("TARGET")
-        tl = QHBoxLayout(grp_target)
+        tl = QVBoxLayout(grp_target)
         tl.setSpacing(6)
-        tl.addWidget(_lbl("Interface"))
+
+        hw_row = QHBoxLayout()
+        hw_row.addWidget(_lbl("Interface"))
         self._combo_iface = QComboBox()
         self._combo_iface.addItems(get_interfaces())
-        tl.addWidget(self._combo_iface)
-        tl.addSpacing(12)
-        tl.addWidget(_lbl("Family"))
+        hw_row.addWidget(self._combo_iface)
+        hw_row.addSpacing(12)
+        hw_row.addWidget(_lbl("Family"))
         self._combo_family = QComboBox()
         self._combo_family.addItems(get_families())
-        tl.addWidget(self._combo_family)
-        tl.addStretch()
+        hw_row.addWidget(self._combo_family)
+        hw_row.addSpacing(12)
+
+        self._btn_detect_device = QPushButton("Detect Device")
+        self._btn_detect_device.setFixedWidth(110)
+        self._btn_detect_device.setToolTip(
+            "Probe the connected device to auto-detect interface and MCU family"
+        )
+        self._btn_detect_device.clicked.connect(self._start_device_detect)
+        hw_row.addWidget(self._btn_detect_device)
+        hw_row.addStretch()
+        tl.addLayout(hw_row)
+
+        # Detection status label
+        self._lbl_detect_status = QLabel("")
+        self._lbl_detect_status.setStyleSheet(
+            f"color:{COLOR['muted']};font-size:10px;font-style:italic;"
+        )
+        tl.addWidget(self._lbl_detect_status)
+
         layout.addWidget(grp_target)
 
-        # ── Firmware ──
+        # ── Firmware group ──
         grp_fw = QGroupBox("FIRMWARE")
         fl = QHBoxLayout(grp_fw)
         fl.setSpacing(6)
         self._lbl_firmware = QLabel("No file selected")
         self._lbl_firmware.setStyleSheet(f"color:{COLOR['muted']};font-style:italic;")
-        self._lbl_firmware.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._lbl_firmware.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         fl.addWidget(self._lbl_firmware)
         btn_fw = QPushButton("Browse")
         btn_fw.setFixedWidth(80)
@@ -328,6 +376,64 @@ class MainWindow(QMainWindow):
         self._progress.setValue(0)
         layout.addWidget(self._progress)
 
+    # ── device detection ───────────────────────────────────────────────────────
+
+    def _start_device_detect(self) -> None:
+        openocd = self._settings_tab.get_openocd_path().strip()
+        if not openocd:
+            QMessageBox.warning(
+                self, "OpenOCD",
+                "OpenOCD path is not configured.\nOpen Settings to set it first."
+            )
+            return
+        self._btn_detect_device.setEnabled(False)
+        self._btn_detect_device.setText("Detecting...")
+        self._lbl_detect_status.setText("Scanning interfaces...")
+        self._lbl_detect_status.setStyleSheet(
+            f"color:{COLOR['muted']};font-size:10px;font-style:italic;"
+        )
+        self._settings_tab.log("Device detection started.", "info")
+
+        self._detector = _DetectorThread(openocd)
+        self._detector.progress.connect(
+            lambda msg: self._lbl_detect_status.setText(msg)
+        )
+        self._detector.detected.connect(self._on_device_detected)
+        self._detector.not_found.connect(self._on_device_not_found)
+        self._detector.start()
+
+    def _on_device_detected(self, iface: str, family: str, idcode: int) -> None:
+        self._btn_detect_device.setEnabled(True)
+        self._btn_detect_device.setText("Detect Device")
+
+        # Update combo boxes
+        iface_idx = self._combo_iface.findText(iface)
+        if iface_idx >= 0:
+            self._combo_iface.setCurrentIndex(iface_idx)
+
+        family_idx = self._combo_family.findText(family)
+        if family_idx >= 0:
+            self._combo_family.setCurrentIndex(family_idx)
+
+        msg = f"Detected: {iface} • {family} (IDCODE 0x{idcode:08X})"
+        self._lbl_detect_status.setText(msg)
+        self._lbl_detect_status.setStyleSheet(
+            f"color:{COLOR['ok']};font-size:10px;font-style:normal;"
+        )
+        self._status.showMessage(msg)
+        self._settings_tab.log(msg, "ok")
+
+    def _on_device_not_found(self) -> None:
+        self._btn_detect_device.setEnabled(True)
+        self._btn_detect_device.setText("Detect Device")
+        msg = "No device detected. Check connection and OpenOCD path."
+        self._lbl_detect_status.setText(msg)
+        self._lbl_detect_status.setStyleSheet(
+            f"color:{COLOR['err']};font-size:10px;font-style:italic;"
+        )
+        self._status.showMessage("Detection failed.")
+        self._settings_tab.log(msg, "warn")
+
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _on_openocd_path_changed(self, path: str) -> None:
@@ -349,7 +455,6 @@ class MainWindow(QMainWindow):
             )
 
     def refresh_stats(self, stats: dict) -> None:
-        """Called by SettingsTab after every flash to update the Flash tab cards."""
         self._sc_total[1].setText(str(stats.get("total", 0)))
         self._sc_success[1].setText(str(stats.get("success", 0)))
         self._sc_failed[1].setText(str(stats.get("failed", 0)))
@@ -374,7 +479,7 @@ class MainWindow(QMainWindow):
             )
             self._settings_tab.log(f"Firmware selected: {path}", "info")
 
-    # ── flash ─────────────────────────────────────────────────────────────────
+    # ── flash ────────────────────────────────────────────────────────────────
 
     def _start_flash(self) -> None:
         openocd = self._settings_tab.get_openocd_path().strip()
@@ -419,7 +524,7 @@ class MainWindow(QMainWindow):
             self._status.showMessage("Flash failed.")
 
 
-# ── shared helpers ────────────────────────────────────────────────────────────
+# ── shared helpers ───────────────────────────────────────────────────────────
 
 _OPENOCD_CANDIDATES = [
     r"C:\Program Files\OpenOCD\bin\openocd.exe",
@@ -460,11 +565,9 @@ def _stat_card(label: str, value: str, color: str = "") -> tuple:
     return (container, lbl_val)
 
 
-# ── password dialog ───────────────────────────────────────────────────────────
+# ── password dialog ────────────────────────────────────────────────────────────
 
 class PasswordDialog(QDialog):
-    """Password prompt shown before entering the Settings tab."""
-
     def __init__(self, parent, stored_hash: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Authentication Required")
