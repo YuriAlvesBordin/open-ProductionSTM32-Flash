@@ -23,19 +23,32 @@ Everything runs in a background thread — the UI stays responsive throughout.
 
 ## Supported hardware
 
-| MCU family | OpenOCD target config |
-|---|---|
-| STM32F0 / F1 | `target/stm32f1x.cfg` |
-| STM32F2 / F4 | `target/stm32f4x.cfg` |
-| STM32F7 | `target/stm32f7x.cfg` |
-| STM32G0 | `target/stm32g0x.cfg` |
-| STM32G4 / L4 | `target/stm32l4x.cfg` |
-| STM32H7 | `target/stm32h7x.cfg` |
-| STM32L0 / L1 | `target/stm32l0.cfg` |
+### MCU families
+
+The application passes the target configuration to OpenOCD using the script files that ship with OpenOCD itself — there are no target config files in this repository.
+
+| MCU family | OpenOCD built-in script | Flash driver |
+|---|---|---|
+| STM32F0 / F1 | `target/stm32f1x.cfg` | `stm32f1x` |
+| STM32F2 / F4 | `target/stm32f4x.cfg` | `stm32f2x` |
+| STM32F7 | `target/stm32f7x.cfg` | `stm32f2x` |
+| STM32G0 | `target/stm32g0x.cfg` | `stm32l4x` |
+| STM32G4 / L4 | `target/stm32l4x.cfg` | `stm32l4x` |
+| STM32H7 | `target/stm32h7x.cfg` | `stm32h7x` |
+| STM32L0 / L1 | `target/stm32l0.cfg` | `stm32lx` |
 
 To add a new family, add one entry to `src/core/family_config.py`. See [`docs/ADDING_FAMILIES.md`](docs/ADDING_FAMILIES.md).
 
-**Debug interfaces:** ST-Link V2, ST-Link V3, J-Link, CMSIS-DAP.
+### Debug interfaces
+
+| Interface | OpenOCD built-in script |
+|---|---|
+| ST-Link V2 | `interface/stlink.cfg` |
+| ST-Link V3 | `interface/stlink.cfg` |
+| J-Link | `interface/jlink.cfg` |
+| CMSIS-DAP | `interface/cmsis-dap.cfg` |
+
+All interface scripts are provided by OpenOCD. The application passes them via `-f` on the command line — no files are bundled here.
 
 ---
 
