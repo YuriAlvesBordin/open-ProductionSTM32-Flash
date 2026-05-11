@@ -28,13 +28,14 @@ FAMILY_MAP: dict[str, FamilyConfig] = {
         unlock_cmd="stm32f2x unlock 0",
         read_cmd="stm32f2x options_read 0",
     ),
+    # fix: usando stm32f7x em vez de stm32f2x (driver correto para F7)
     "STM32F7": FamilyConfig(
         label="STM32F7",
         target_cfg="target/stm32f7x.cfg",
         flash_base="0x08000000",
-        lock_cmd="stm32f2x lock 0",
-        unlock_cmd="stm32f2x unlock 0",
-        read_cmd="stm32f2x options_read 0",
+        lock_cmd="stm32f7x lock 0",
+        unlock_cmd="stm32f7x unlock 0",
+        read_cmd="stm32f7x options_read 0",
     ),
     "STM32G0": FamilyConfig(
         label="STM32G0",
@@ -70,11 +71,12 @@ FAMILY_MAP: dict[str, FamilyConfig] = {
     ),
 }
 
+# fix: ST-Link V3 usa interface/stlink-dap.cfg para suporte completo de velocidade
 INTERFACE_MAP: dict[str, str] = {
-    "ST-Link V2": "interface/stlink.cfg",
-    "ST-Link V3": "interface/stlink.cfg",
-    "J-Link":     "interface/jlink.cfg",
-    "CMSIS-DAP":  "interface/cmsis-dap.cfg",
+    "ST-Link V2":  "interface/stlink.cfg",
+    "ST-Link V3":  "interface/stlink-dap.cfg",
+    "J-Link":      "interface/jlink.cfg",
+    "CMSIS-DAP":   "interface/cmsis-dap.cfg",
 }
 
 
