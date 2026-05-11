@@ -1,40 +1,33 @@
 """Main application window — remastered UI.
 
-Layout: two-tab design  (Flash | Configurações)
-Style:  dense, dark, minimalist — no decorative noise.
+Layout: two-tab design  (Flash | Settings)
+Style:  dense, dark, minimalist.
 """
 from __future__ import annotations
 
 import hashlib
-import json
 import shutil
-import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QIcon, QColor
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QProgressBar,
+    QPushButton,
     QSizePolicy,
-    QStackedWidget,
     QStatusBar,
     QTabWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -43,21 +36,21 @@ from core.family_config import get_families, get_interfaces, get_config, get_int
 from core.flash_worker import FlashWorker
 from ui.settings_tab import SettingsTab
 
-# ─── palette ────────────────────────────────────────────────────────────────
+# ── palette ──────────────────────────────────────────────────────────────────
 COLOR = {
-    "bg":         "#0f0f0f",
-    "surface":    "#161616",
-    "surface2":   "#1c1c1c",
-    "border":     "#2a2a2a",
-    "text":       "#e8e8e8",
-    "muted":      "#6a6a6a",
-    "accent":     "#01696f",
-    "accent_h":   "#0c4e54",
-    "accent_p":   "#0f3638",
-    "ok":         "#3fb950",
-    "warn":       "#d29922",
-    "err":        "#f85149",
-    "disabled":   "#2e2e2e",
+    "bg":       "#0f0f0f",
+    "surface":  "#161616",
+    "surface2": "#1c1c1c",
+    "border":   "#2a2a2a",
+    "text":     "#e8e8e8",
+    "muted":    "#6a6a6a",
+    "accent":   "#01696f",
+    "accent_h": "#0c4e54",
+    "accent_p": "#0f3638",
+    "ok":       "#3fb950",
+    "warn":     "#d29922",
+    "err":      "#f85149",
+    "disabled": "#2e2e2e",
 }
 
 APP_STYLESHEET = f"""
@@ -185,6 +178,8 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QLabel {{ background: transparent; }}
 """
 
+DEFAULT_PASSWORD_HASH = hashlib.sha256(b"123").hexdigest()
+
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -196,7 +191,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(APP_STYLESHEET)
         self._build_ui()
 
-    # ── UI construction ──────────────────────────────────────────────────────
+    # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -235,15 +230,13 @@ class MainWindow(QMainWindow):
 
         self._settings_tab = SettingsTab(self)
         self._settings_tab.openocd_path_changed.connect(self._on_openocd_path_changed)
-        self._tabs.addTab(self._settings_tab, "CONFIGURAÇÕES  🔒")
-        self._tabs.tabBar().setTabEnabled(1, False)  # locked by default
-        self._tabs.tabBar().installEventFilter(self)
+        self._tabs.addTab(self._settings_tab, "SETTINGS  🔒")
+        self._tabs.tabBar().setTabEnabled(1, False)
 
         self._status = QStatusBar()
         self.setStatusBar(self._status)
-        self._status.showMessage("Pronto.")
+        self._status.showMessage("Ready.")
 
-        # detect openocd after settings tab created
         self._auto_detect_openocd()
 
     def _build_flash_tab(self, parent: QWidget) -> None:
@@ -262,31 +255,30 @@ class MainWindow(QMainWindow):
         self._combo_iface.addItems(get_interfaces())
         hw_row.addWidget(self._combo_iface)
         hw_row.addSpacing(12)
-        hw_row.addWidget(self._lbl("Família"))
+        hw_row.addWidget(self._lbl("Family"))
         self._combo_family = QComboBox()
         self._combo_family.addItems(get_families())
         hw_row.addWidget(self._combo_family)
         hw_row.addStretch()
         tl.addLayout(hw_row)
-
         layout.addWidget(grp_target)
 
         # ── Firmware group ──
         grp_fw = QGroupBox("FIRMWARE")
         fl = QHBoxLayout(grp_fw)
         fl.setSpacing(6)
-        self._lbl_firmware = QLabel("Nenhum arquivo selecionado")
+        self._lbl_firmware = QLabel("No file selected")
         self._lbl_firmware.setStyleSheet(f"color:{COLOR['muted']};font-style:italic;")
         self._lbl_firmware.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         fl.addWidget(self._lbl_firmware)
-        btn_fw = QPushButton("Selecionar")
-        btn_fw.setFixedWidth(90)
+        btn_fw = QPushButton("Browse")
+        btn_fw.setFixedWidth(80)
         btn_fw.clicked.connect(self._browse_firmware)
         fl.addWidget(btn_fw)
         layout.addWidget(grp_fw)
 
         # ── Options ──
-        grp_opts = QGroupBox("OPÇÕES")
+        grp_opts = QGroupBox("OPTIONS")
         ol = QHBoxLayout(grp_opts)
         self._btn_rdp = QPushButton("RDP Level 1")
         self._btn_rdp.setCheckable(True)
@@ -309,14 +301,14 @@ class MainWindow(QMainWindow):
             """
         )
         ol.addWidget(self._btn_rdp)
-        ol.addWidget(self._lbl("Ativar RDP após gravar", muted=True))
+        ol.addWidget(self._lbl("Enable RDP after flashing", muted=True))
         ol.addStretch()
         layout.addWidget(grp_opts)
 
         layout.addStretch(1)
 
         # ── Flash button ──
-        self._btn_flash = QPushButton("▶  GRAVAR")
+        self._btn_flash = QPushButton("▶  FLASH")
         self._btn_flash.setMinimumHeight(40)
         self._btn_flash.setStyleSheet(
             f"""
@@ -339,10 +331,10 @@ class MainWindow(QMainWindow):
         self._progress.setValue(0)
         layout.addWidget(self._progress)
 
-        # ── Lock tab button (bottom right) ──
+        # ── Settings unlock shortcut ──
         lock_row = QHBoxLayout()
         lock_row.addStretch()
-        btn_unlock = QPushButton("🔓  Configurações")
+        btn_unlock = QPushButton("🔓  Settings")
         btn_unlock.setFixedHeight(26)
         btn_unlock.setStyleSheet(
             f"font-size:10px;color:{COLOR['muted']};border:1px solid {COLOR['border']};"
@@ -352,7 +344,7 @@ class MainWindow(QMainWindow):
         lock_row.addWidget(btn_unlock)
         layout.addLayout(lock_row)
 
-    # ── helpers ──────────────────────────────────────────────────────────────
+    # ── helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
     def _lbl(text: str, muted: bool = False) -> QLabel:
@@ -362,19 +354,15 @@ class MainWindow(QMainWindow):
         return lbl
 
     def _on_openocd_path_changed(self, path: str) -> None:
-        """Settings tab notifies us when the openocd path changes."""
         self._status.showMessage(f"OpenOCD: {path}")
 
     def _auto_detect_openocd(self) -> None:
         path = shutil.which("openocd")
         if not path:
-            # common install locations
             candidates = [
-                # Windows
-                r"C:\\Program Files\\OpenOCD\\bin\\openocd.exe",
-                r"C:\\OpenOCD\\bin\\openocd.exe",
-                r"C:\\tools\\OpenOCD\\bin\\openocd.exe",
-                # Linux / macOS
+                r"C:\Program Files\OpenOCD\bin\openocd.exe",
+                r"C:\OpenOCD\bin\openocd.exe",
+                r"C:\tools\OpenOCD\bin\openocd.exe",
                 "/usr/bin/openocd",
                 "/usr/local/bin/openocd",
                 "/opt/homebrew/bin/openocd",
@@ -386,52 +374,53 @@ class MainWindow(QMainWindow):
                     break
         if path:
             self._settings_tab.set_openocd_path(path)
-            self._settings_tab.log(f"OpenOCD detectado automaticamente: {path}", "ok")
+            self._settings_tab.log(f"OpenOCD auto-detected: {path}", "ok")
         else:
             self._settings_tab.log(
-                "OpenOCD não encontrado. Configure o caminho manualmente.", "warn"
+                "OpenOCD not found. Set the path manually in Settings.", "warn"
             )
 
     # ── settings lock / unlock ────────────────────────────────────────────────
 
     def _request_unlock(self) -> None:
-        dlg = PasswordDialog(self, mode="unlock",
-                             stored_hash=self._settings_tab.get_password_hash())
+        dlg = PasswordDialog(self, stored_hash=self._settings_tab.get_password_hash())
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._tabs.tabBar().setTabEnabled(1, True)
             self._tabs.setCurrentIndex(1)
-            self._tabs.setTabText(1, "CONFIGURAÇÕES")
-            self._settings_tab.log("Configurações desbloqueadas.", "ok")
+            self._tabs.setTabText(1, "SETTINGS")
+            self._settings_tab.log("Settings unlocked.", "ok")
 
     def lock_settings(self) -> None:
         self._tabs.tabBar().setTabEnabled(1, False)
         self._tabs.setCurrentIndex(0)
-        self._tabs.setTabText(1, "CONFIGURAÇÕES  🔒")
-        self._settings_tab.log("Configurações bloqueadas.", "info")
+        self._tabs.setTabText(1, "SETTINGS  🔒")
+        self._settings_tab.log("Settings locked.", "info")
 
     # ── firmware ──────────────────────────────────────────────────────────────
 
     def _browse_firmware(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Selecionar Firmware", "",
-            "Firmware (*.bin *.hex *.elf);;Todos (*)"
+            self, "Select Firmware", "",
+            "Firmware (*.bin *.hex *.elf);;All files (*)"
         )
         if path:
             self._firmware_path = path
-            name = Path(path).name
-            self._lbl_firmware.setText(name)
-            self._lbl_firmware.setStyleSheet(f"color:{COLOR['ok']};font-style:normal;font-weight:bold;")
-            self._settings_tab.log(f"Firmware selecionado: {path}", "info")
+            self._lbl_firmware.setText(Path(path).name)
+            self._lbl_firmware.setStyleSheet(
+                f"color:{COLOR['ok']};font-style:normal;font-weight:bold;"
+            )
+            self._settings_tab.log(f"Firmware selected: {path}", "info")
 
     # ── flash ─────────────────────────────────────────────────────────────────
 
     def _start_flash(self) -> None:
         openocd = self._settings_tab.get_openocd_path().strip()
         if not openocd:
-            QMessageBox.warning(self, "OpenOCD", "Configure o caminho do OpenOCD nas Configurações.")
+            QMessageBox.warning(self, "OpenOCD",
+                                "OpenOCD path is not configured. Open Settings to set it.")
             return
         if not self._firmware_path:
-            QMessageBox.warning(self, "Firmware", "Selecione um arquivo de firmware primeiro.")
+            QMessageBox.warning(self, "Firmware", "Please select a firmware file first.")
             return
 
         family_cfg = get_config(self._combo_family.currentText())
@@ -439,7 +428,7 @@ class MainWindow(QMainWindow):
 
         self._btn_flash.setEnabled(False)
         self._progress.setValue(0)
-        self._status.showMessage("Gravando...")
+        self._status.showMessage("Flashing...")
 
         self._worker = FlashWorker(
             openocd_path=openocd,
@@ -458,40 +447,35 @@ class MainWindow(QMainWindow):
 
     def _on_finished(self, success: bool, message: str) -> None:
         self._btn_flash.setEnabled(True)
-        level = "ok" if success else "error"
-        self._settings_tab.log(message, level)
+        self._settings_tab.log(message, "ok" if success else "error")
         self._settings_tab.record_flash(success)
         if success:
-            self._status.showMessage("Concluído com sucesso.")
+            self._status.showMessage("Completed successfully.")
             self._progress.setValue(100)
         else:
-            self._status.showMessage("Falha no processo.")
+            self._status.showMessage("Flash failed.")
 
 
-# ─── password dialog ─────────────────────────────────────────────────────────
-
-DEFAULT_PASSWORD_HASH = hashlib.sha256(b"123").hexdigest()
-
+# ─── password dialog ──────────────────────────────────────────────────────────
 
 class PasswordDialog(QDialog):
-    """Simple password prompt."""
+    """Simple password prompt to unlock the Settings tab."""
 
-    def __init__(self, parent, mode: str = "unlock", stored_hash: str = DEFAULT_PASSWORD_HASH):
+    def __init__(self, parent, stored_hash: str = ""):
         super().__init__(parent)
-        self.setWindowTitle("Autenticação" if mode == "unlock" else "Alterar Senha")
-        self.setFixedWidth(320)
-        self._stored_hash = stored_hash
-        self._mode = mode
+        self.setWindowTitle("Authentication")
+        self.setFixedWidth(300)
+        self._stored_hash = stored_hash or hashlib.sha256(b"123").hexdigest()
         self.setStyleSheet(parent.styleSheet())
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
         layout.setContentsMargins(16, 16, 16, 16)
 
-        layout.addWidget(QLabel("Senha:"))
+        layout.addWidget(QLabel("Password:"))
         self._pwd = QLineEdit()
         self._pwd.setEchoMode(QLineEdit.EchoMode.Password)
-        self._pwd.setPlaceholderText("Digite a senha")
+        self._pwd.setPlaceholderText("Enter password")
         layout.addWidget(self._pwd)
 
         self._err = QLabel("")
@@ -504,15 +488,13 @@ class PasswordDialog(QDialog):
         btns.accepted.connect(self._validate)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
-
         self._pwd.returnPressed.connect(self._validate)
 
     def _validate(self) -> None:
-        entered = self._pwd.text()
-        entered_hash = hashlib.sha256(entered.encode()).hexdigest()
+        entered_hash = hashlib.sha256(self._pwd.text().encode()).hexdigest()
         if entered_hash == self._stored_hash:
             self.accept()
         else:
-            self._err.setText("Senha incorreta.")
+            self._err.setText("Incorrect password.")
             self._pwd.clear()
             self._pwd.setFocus()
