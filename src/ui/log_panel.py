@@ -1,12 +1,14 @@
+"""Legacy LogPanel — kept for backward compatibility.
+New code should use SettingsTab.log() directly.
+"""
 from PyQt6.QtWidgets import QTextEdit
 from PyQt6.QtGui import QFont, QTextCursor
 
-
 LEVEL_COLORS = {
     "info":  "#9cdcfe",
-    "ok":    "#4ec94e",
-    "warn":  "#f0a500",
-    "error": "#f44747",
+    "ok":    "#3fb950",
+    "warn":  "#d29922",
+    "error": "#f85149",
 }
 
 LEVEL_ICONS = {
@@ -23,15 +25,13 @@ class LogPanel(QTextEdit):
         self.setReadOnly(True)
         self.setFont(QFont("Consolas", 9))
         self.setStyleSheet(
-            "background: #1a1a2e; "
-            "color: #e0e0e0; "
-            "border-radius: 6px;"
+            "background:#1c1c1c;color:#e8e8e8;border:1px solid #2a2a2a;border-radius:3px;"
         )
-        self.setMinimumHeight(160)
+        self.setMinimumHeight(120)
 
     def append_line(self, message: str, level: str = "info") -> None:
-        color = LEVEL_COLORS.get(level, "#e0e0e0")
-        icon  = LEVEL_ICONS.get(level, "·")
+        color = LEVEL_COLORS.get(level, "#e8e8e8")
+        icon = LEVEL_ICONS.get(level, "·")
         self.append(f'<span style="color:{color}">{icon} {message}</span>')
         self.moveCursor(QTextCursor.MoveOperation.End)
 

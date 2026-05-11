@@ -1,202 +1,518 @@
+"""Main application window — remastered UI.
+
+Layout: two-tab design  (Flash | Configurações)
+Style:  dense, dark, minimalist — no decorative noise.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
 import shutil
+import sys
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
+
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QFont, QIcon, QColor
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFileDialog, QProgressBar,
-    QComboBox, QGroupBox, QFrame, QStatusBar,
-    QMessageBox, QLineEdit,
+    QApplication,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QProgressBar,
+    QSizePolicy,
+    QStackedWidget,
+    QStatusBar,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtGui import QFont
-from PyQt6.QtCore import Qt
+
 from core.family_config import get_families, get_interfaces, get_config, get_interface_cfg
 from core.flash_worker import FlashWorker
-from ui.log_panel import LogPanel
+from ui.settings_tab import SettingsTab
+
+# ─── palette ────────────────────────────────────────────────────────────────
+COLOR = {
+    "bg":         "#0f0f0f",
+    "surface":    "#161616",
+    "surface2":   "#1c1c1c",
+    "border":     "#2a2a2a",
+    "text":       "#e8e8e8",
+    "muted":      "#6a6a6a",
+    "accent":     "#01696f",
+    "accent_h":   "#0c4e54",
+    "accent_p":   "#0f3638",
+    "ok":         "#3fb950",
+    "warn":       "#d29922",
+    "err":        "#f85149",
+    "disabled":   "#2e2e2e",
+}
+
+APP_STYLESHEET = f"""
+QWidget {{
+    background: {COLOR['bg']};
+    color: {COLOR['text']};
+    font-family: 'Consolas', 'JetBrains Mono', 'Courier New', monospace;
+    font-size: 12px;
+}}
+QTabWidget::pane {{
+    border: 1px solid {COLOR['border']};
+    border-top: none;
+    background: {COLOR['surface']};
+}}
+QTabBar::tab {{
+    background: {COLOR['surface2']};
+    color: {COLOR['muted']};
+    border: 1px solid {COLOR['border']};
+    border-bottom: none;
+    padding: 6px 20px;
+    margin-right: 2px;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}}
+QTabBar::tab:selected {{
+    background: {COLOR['surface']};
+    color: {COLOR['text']};
+    border-bottom: 2px solid {COLOR['accent']};
+}}
+QTabBar::tab:hover:!selected {{
+    color: {COLOR['text']};
+}}
+QGroupBox {{
+    border: 1px solid {COLOR['border']};
+    border-radius: 4px;
+    margin-top: 8px;
+    padding-top: 10px;
+    font-size: 10px;
+    color: {COLOR['muted']};
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 4px;
+}}
+QLineEdit {{
+    background: {COLOR['surface2']};
+    border: 1px solid {COLOR['border']};
+    border-radius: 3px;
+    padding: 5px 8px;
+    color: {COLOR['text']};
+    selection-background-color: {COLOR['accent']};
+}}
+QLineEdit:focus {{
+    border-color: {COLOR['accent']};
+}}
+QComboBox {{
+    background: {COLOR['surface2']};
+    border: 1px solid {COLOR['border']};
+    border-radius: 3px;
+    padding: 5px 8px;
+    color: {COLOR['text']};
+    min-width: 120px;
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 20px;
+}}
+QComboBox QAbstractItemView {{
+    background: {COLOR['surface2']};
+    border: 1px solid {COLOR['border']};
+    selection-background-color: {COLOR['accent']};
+}}
+QPushButton {{
+    background: {COLOR['surface2']};
+    border: 1px solid {COLOR['border']};
+    border-radius: 3px;
+    padding: 5px 12px;
+    color: {COLOR['text']};
+}}
+QPushButton:hover {{
+    border-color: {COLOR['accent']};
+    color: {COLOR['text']};
+}}
+QPushButton:pressed {{
+    background: {COLOR['accent_p']};
+}}
+QPushButton:disabled {{
+    background: {COLOR['disabled']};
+    color: {COLOR['muted']};
+    border-color: {COLOR['border']};
+}}
+QProgressBar {{
+    border: 1px solid {COLOR['border']};
+    border-radius: 3px;
+    background: {COLOR['surface2']};
+    text-align: center;
+    color: {COLOR['muted']};
+    font-size: 10px;
+    max-height: 14px;
+}}
+QProgressBar::chunk {{
+    background: {COLOR['accent']};
+    border-radius: 2px;
+}}
+QStatusBar {{
+    background: {COLOR['surface2']};
+    color: {COLOR['muted']};
+    font-size: 10px;
+    border-top: 1px solid {COLOR['border']};
+}}
+QScrollBar:vertical {{
+    background: {COLOR['surface2']};
+    width: 6px;
+    border-radius: 3px;
+}}
+QScrollBar::handle:vertical {{
+    background: {COLOR['border']};
+    border-radius: 3px;
+    min-height: 20px;
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QLabel {{ background: transparent; }}
+"""
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("STM32 Production Flasher")
-        self.setMinimumSize(720, 600)
+        self.setWindowTitle("STM32 Flash")
+        self.setMinimumSize(680, 520)
         self._firmware_path = ""
-        self._worker: FlashWorker | None = None
+        self._worker: Optional[FlashWorker] = None
+        self.setStyleSheet(APP_STYLESHEET)
         self._build_ui()
-        self._detect_openocd()
 
-    def _detect_openocd(self) -> None:
-        path = shutil.which("openocd")
-        if path:
-            self._openocd_input.setText(path)
-            self._log(f"OpenOCD detected at: {path}", "ok")
-        else:
-            self._log("OpenOCD not found in PATH. Enter the path manually.", "warn")
+    # ── UI construction ──────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setSpacing(12)
-        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(0)
+        root.setContentsMargins(0, 0, 0, 0)
 
-        title = QLabel("STM32 Production Flasher")
-        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root.addWidget(title)
+        # Header bar
+        header = QWidget()
+        header.setFixedHeight(36)
+        header.setStyleSheet(
+            f"background:{COLOR['surface2']};border-bottom:1px solid {COLOR['border']};"
+        )
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(12, 0, 12, 0)
+        lbl = QLabel("STM32 FLASH")
+        lbl.setStyleSheet(
+            f"color:{COLOR['text']};font-size:13px;font-weight:bold;letter-spacing:2px;"
+        )
+        hl.addWidget(lbl)
+        hl.addStretch()
+        ver = QLabel("v2.0")
+        ver.setStyleSheet(f"color:{COLOR['muted']};font-size:10px;")
+        hl.addWidget(ver)
+        root.addWidget(header)
 
-        subtitle = QLabel("Firmware flashing + RDP activation via OpenOCD")
-        subtitle.setFont(QFont("Segoe UI", 9))
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setStyleSheet("color: #666;")
-        root.addWidget(subtitle)
+        # Tabs
+        self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
+        root.addWidget(self._tabs)
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #ccc;")
-        root.addWidget(sep)
+        self._tab_flash = QWidget()
+        self._build_flash_tab(self._tab_flash)
+        self._tabs.addTab(self._tab_flash, "FLASH")
 
-        cfg_group = QGroupBox("Configuration")
-        cfg_layout = QVBoxLayout(cfg_group)
-        cfg_layout.setSpacing(8)
-
-        ocd_row = QHBoxLayout()
-        ocd_row.addWidget(QLabel("OpenOCD:"))
-        self._openocd_input = QLineEdit()
-        self._openocd_input.setPlaceholderText("Path to openocd executable")
-        ocd_row.addWidget(self._openocd_input)
-        btn_ocd = QPushButton("...")
-        btn_ocd.setFixedWidth(36)
-        btn_ocd.clicked.connect(self._browse_openocd)
-        ocd_row.addWidget(btn_ocd)
-        cfg_layout.addLayout(ocd_row)
-
-        hw_row = QHBoxLayout()
-        hw_row.addWidget(QLabel("Interface:"))
-        self._combo_iface = QComboBox()
-        self._combo_iface.addItems(get_interfaces())
-        hw_row.addWidget(self._combo_iface)
-        hw_row.addSpacing(16)
-        hw_row.addWidget(QLabel("STM32 Family:"))
-        self._combo_family = QComboBox()
-        self._combo_family.addItems(get_families())
-        hw_row.addWidget(self._combo_family)
-        cfg_layout.addLayout(hw_row)
-
-        fw_row = QHBoxLayout()
-        fw_row.addWidget(QLabel("Firmware:"))
-        self._lbl_firmware = QLabel("No file selected")
-        self._lbl_firmware.setStyleSheet("color: #888; font-style: italic;")
-        fw_row.addWidget(self._lbl_firmware, stretch=1)
-        btn_fw = QPushButton("Select .bin / .hex / .elf")
-        btn_fw.clicked.connect(self._browse_firmware)
-        fw_row.addWidget(btn_fw)
-        cfg_layout.addLayout(fw_row)
-
-        root.addWidget(cfg_group)
-
-        opt_group = QGroupBox("Options")
-        opt_layout = QHBoxLayout(opt_group)
-        self._btn_rdp = QPushButton("🔒  Enable RDP Level 1 after flashing")
-        self._btn_rdp.setCheckable(True)
-        self._btn_rdp.setChecked(True)
-        self._btn_rdp.setStyleSheet("""
-            QPushButton { background: #f0f0f0; border: 1px solid #ccc; border-radius: 6px; padding: 6px 14px; }
-            QPushButton:checked { background: #d4edda; border-color: #28a745; color: #155724; font-weight: bold; }
-        """)
-        opt_layout.addWidget(self._btn_rdp)
-        opt_layout.addStretch()
-        root.addWidget(opt_group)
-
-        self._btn_flash = QPushButton("▶  Flash + Lock")
-        self._btn_flash.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        self._btn_flash.setMinimumHeight(48)
-        self._btn_flash.setStyleSheet("""
-            QPushButton { background: #01696f; color: white; border-radius: 8px; border: none; }
-            QPushButton:hover   { background: #0c4e54; }
-            QPushButton:pressed { background: #0f3638; }
-            QPushButton:disabled { background: #aaa; color: #ddd; }
-        """)
-        self._btn_flash.clicked.connect(self._start_flash)
-        root.addWidget(self._btn_flash)
-
-        self._progress = QProgressBar()
-        self._progress.setValue(0)
-        self._progress.setTextVisible(True)
-        self._progress.setStyleSheet("""
-            QProgressBar { border: 1px solid #ccc; border-radius: 6px; height: 22px; text-align: center; }
-            QProgressBar::chunk { background: #01696f; border-radius: 5px; }
-        """)
-        root.addWidget(self._progress)
-
-        log_label = QLabel("Execution log:")
-        log_label.setFont(QFont("Segoe UI", 9))
-        root.addWidget(log_label)
-
-        self._log_panel = LogPanel()
-        root.addWidget(self._log_panel)
-
-        btn_clear = QPushButton("Clear log")
-        btn_clear.setFixedWidth(100)
-        btn_clear.clicked.connect(self._log_panel.clear_log)
-        root.addWidget(btn_clear, alignment=Qt.AlignmentFlag.AlignRight)
+        self._settings_tab = SettingsTab(self)
+        self._settings_tab.openocd_path_changed.connect(self._on_openocd_path_changed)
+        self._tabs.addTab(self._settings_tab, "CONFIGURAÇÕES  🔒")
+        self._tabs.tabBar().setTabEnabled(1, False)  # locked by default
+        self._tabs.tabBar().installEventFilter(self)
 
         self._status = QStatusBar()
         self.setStatusBar(self._status)
-        self._status.showMessage("Ready.")
+        self._status.showMessage("Pronto.")
 
-    def _browse_openocd(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Locate OpenOCD", "", "Executables (*)")
+        # detect openocd after settings tab created
+        self._auto_detect_openocd()
+
+    def _build_flash_tab(self, parent: QWidget) -> None:
+        layout = QVBoxLayout(parent)
+        layout.setSpacing(8)
+        layout.setContentsMargins(12, 12, 12, 12)
+
+        # ── Target group ──
+        grp_target = QGroupBox("TARGET")
+        tl = QVBoxLayout(grp_target)
+        tl.setSpacing(6)
+
+        hw_row = QHBoxLayout()
+        hw_row.addWidget(self._lbl("Interface"))
+        self._combo_iface = QComboBox()
+        self._combo_iface.addItems(get_interfaces())
+        hw_row.addWidget(self._combo_iface)
+        hw_row.addSpacing(12)
+        hw_row.addWidget(self._lbl("Família"))
+        self._combo_family = QComboBox()
+        self._combo_family.addItems(get_families())
+        hw_row.addWidget(self._combo_family)
+        hw_row.addStretch()
+        tl.addLayout(hw_row)
+
+        layout.addWidget(grp_target)
+
+        # ── Firmware group ──
+        grp_fw = QGroupBox("FIRMWARE")
+        fl = QHBoxLayout(grp_fw)
+        fl.setSpacing(6)
+        self._lbl_firmware = QLabel("Nenhum arquivo selecionado")
+        self._lbl_firmware.setStyleSheet(f"color:{COLOR['muted']};font-style:italic;")
+        self._lbl_firmware.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        fl.addWidget(self._lbl_firmware)
+        btn_fw = QPushButton("Selecionar")
+        btn_fw.setFixedWidth(90)
+        btn_fw.clicked.connect(self._browse_firmware)
+        fl.addWidget(btn_fw)
+        layout.addWidget(grp_fw)
+
+        # ── Options ──
+        grp_opts = QGroupBox("OPÇÕES")
+        ol = QHBoxLayout(grp_opts)
+        self._btn_rdp = QPushButton("RDP Level 1")
+        self._btn_rdp.setCheckable(True)
+        self._btn_rdp.setChecked(True)
+        self._btn_rdp.setFixedWidth(110)
+        self._btn_rdp.setStyleSheet(
+            f"""
+            QPushButton {{
+                background:{COLOR['surface2']};
+                border:1px solid {COLOR['border']};
+                border-radius:3px; padding:4px 10px;
+                color:{COLOR['muted']};
+            }}
+            QPushButton:checked {{
+                background:{COLOR['accent_p']};
+                border-color:{COLOR['accent']};
+                color:{COLOR['ok']};
+                font-weight:bold;
+            }}
+            """
+        )
+        ol.addWidget(self._btn_rdp)
+        ol.addWidget(self._lbl("Ativar RDP após gravar", muted=True))
+        ol.addStretch()
+        layout.addWidget(grp_opts)
+
+        layout.addStretch(1)
+
+        # ── Flash button ──
+        self._btn_flash = QPushButton("▶  GRAVAR")
+        self._btn_flash.setMinimumHeight(40)
+        self._btn_flash.setStyleSheet(
+            f"""
+            QPushButton {{
+                background:{COLOR['accent']};
+                border:none; border-radius:3px;
+                color:#fff; font-size:13px; font-weight:bold;
+                letter-spacing:1px;
+            }}
+            QPushButton:hover   {{ background:{COLOR['accent_h']}; }}
+            QPushButton:pressed {{ background:{COLOR['accent_p']}; }}
+            QPushButton:disabled {{ background:{COLOR['disabled']}; color:{COLOR['muted']}; }}
+            """
+        )
+        self._btn_flash.clicked.connect(self._start_flash)
+        layout.addWidget(self._btn_flash)
+
+        # ── Progress ──
+        self._progress = QProgressBar()
+        self._progress.setValue(0)
+        layout.addWidget(self._progress)
+
+        # ── Lock tab button (bottom right) ──
+        lock_row = QHBoxLayout()
+        lock_row.addStretch()
+        btn_unlock = QPushButton("🔓  Configurações")
+        btn_unlock.setFixedHeight(26)
+        btn_unlock.setStyleSheet(
+            f"font-size:10px;color:{COLOR['muted']};border:1px solid {COLOR['border']};"
+            f"border-radius:3px;background:transparent;padding:2px 8px;"
+        )
+        btn_unlock.clicked.connect(self._request_unlock)
+        lock_row.addWidget(btn_unlock)
+        layout.addLayout(lock_row)
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _lbl(text: str, muted: bool = False) -> QLabel:
+        lbl = QLabel(text)
+        if muted:
+            lbl.setStyleSheet(f"color:{COLOR['muted']};font-size:11px;")
+        return lbl
+
+    def _on_openocd_path_changed(self, path: str) -> None:
+        """Settings tab notifies us when the openocd path changes."""
+        self._status.showMessage(f"OpenOCD: {path}")
+
+    def _auto_detect_openocd(self) -> None:
+        path = shutil.which("openocd")
+        if not path:
+            # common install locations
+            candidates = [
+                # Windows
+                r"C:\\Program Files\\OpenOCD\\bin\\openocd.exe",
+                r"C:\\OpenOCD\\bin\\openocd.exe",
+                r"C:\\tools\\OpenOCD\\bin\\openocd.exe",
+                # Linux / macOS
+                "/usr/bin/openocd",
+                "/usr/local/bin/openocd",
+                "/opt/homebrew/bin/openocd",
+                "/opt/openocd/bin/openocd",
+            ]
+            for c in candidates:
+                if Path(c).exists():
+                    path = c
+                    break
         if path:
-            self._openocd_input.setText(path)
+            self._settings_tab.set_openocd_path(path)
+            self._settings_tab.log(f"OpenOCD detectado automaticamente: {path}", "ok")
+        else:
+            self._settings_tab.log(
+                "OpenOCD não encontrado. Configure o caminho manualmente.", "warn"
+            )
+
+    # ── settings lock / unlock ────────────────────────────────────────────────
+
+    def _request_unlock(self) -> None:
+        dlg = PasswordDialog(self, mode="unlock",
+                             stored_hash=self._settings_tab.get_password_hash())
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._tabs.tabBar().setTabEnabled(1, True)
+            self._tabs.setCurrentIndex(1)
+            self._tabs.setTabText(1, "CONFIGURAÇÕES")
+            self._settings_tab.log("Configurações desbloqueadas.", "ok")
+
+    def lock_settings(self) -> None:
+        self._tabs.tabBar().setTabEnabled(1, False)
+        self._tabs.setCurrentIndex(0)
+        self._tabs.setTabText(1, "CONFIGURAÇÕES  🔒")
+        self._settings_tab.log("Configurações bloqueadas.", "info")
+
+    # ── firmware ──────────────────────────────────────────────────────────────
 
     def _browse_firmware(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Firmware", "",
-            "Firmware (*.bin *.hex *.elf);;All files (*)"
+            self, "Selecionar Firmware", "",
+            "Firmware (*.bin *.hex *.elf);;Todos (*)"
         )
         if path:
             self._firmware_path = path
-            self._lbl_firmware.setText(Path(path).name)
-            self._lbl_firmware.setStyleSheet("color: #155724; font-style: normal; font-weight: bold;")
-            self._log(f"Firmware selected: {path}", "info")
+            name = Path(path).name
+            self._lbl_firmware.setText(name)
+            self._lbl_firmware.setStyleSheet(f"color:{COLOR['ok']};font-style:normal;font-weight:bold;")
+            self._settings_tab.log(f"Firmware selecionado: {path}", "info")
 
-    def _log(self, message: str, level: str = "info") -> None:
-        self._log_panel.append_line(message, level)
+    # ── flash ─────────────────────────────────────────────────────────────────
 
     def _start_flash(self) -> None:
-        openocd = self._openocd_input.text().strip()
+        openocd = self._settings_tab.get_openocd_path().strip()
         if not openocd:
-            QMessageBox.warning(self, "OpenOCD", "Enter the path to the OpenOCD executable.")
+            QMessageBox.warning(self, "OpenOCD", "Configure o caminho do OpenOCD nas Configurações.")
             return
         if not self._firmware_path:
-            QMessageBox.warning(self, "Firmware", "Select a firmware file first.")
+            QMessageBox.warning(self, "Firmware", "Selecione um arquivo de firmware primeiro.")
             return
 
-        family_cfg   = get_config(self._combo_family.currentText())
+        family_cfg = get_config(self._combo_family.currentText())
         interface_cfg = get_interface_cfg(self._combo_iface.currentText())
 
         self._btn_flash.setEnabled(False)
         self._progress.setValue(0)
-        self._status.showMessage("Flashing...")
+        self._status.showMessage("Gravando...")
 
         self._worker = FlashWorker(
-            openocd_path  = openocd,
-            firmware_path = self._firmware_path,
-            interface_cfg = interface_cfg,
-            family        = family_cfg,
-            enable_rdp    = self._btn_rdp.isChecked(),
+            openocd_path=openocd,
+            firmware_path=self._firmware_path,
+            interface_cfg=interface_cfg,
+            family=family_cfg,
+            enable_rdp=self._btn_rdp.isChecked(),
         )
-        self._worker.log.connect(self._log)
+        self._worker.log.connect(self._on_flash_log)
         self._worker.progress.connect(self._progress.setValue)
         self._worker.finished.connect(self._on_finished)
         self._worker.start()
 
+    def _on_flash_log(self, message: str, level: str) -> None:
+        self._settings_tab.log(message, level)
+
     def _on_finished(self, success: bool, message: str) -> None:
         self._btn_flash.setEnabled(True)
+        level = "ok" if success else "error"
+        self._settings_tab.log(message, level)
+        self._settings_tab.record_flash(success)
         if success:
-            self._log(message, "ok")
-            self._status.showMessage("Completed successfully.")
-            QMessageBox.information(self, "Success", message)
+            self._status.showMessage("Concluído com sucesso.")
+            self._progress.setValue(100)
         else:
-            self._log(message, "error")
-            self._status.showMessage("Process failed.")
-            QMessageBox.critical(self, "Error", message)
+            self._status.showMessage("Falha no processo.")
+
+
+# ─── password dialog ─────────────────────────────────────────────────────────
+
+DEFAULT_PASSWORD_HASH = hashlib.sha256(b"123").hexdigest()
+
+
+class PasswordDialog(QDialog):
+    """Simple password prompt."""
+
+    def __init__(self, parent, mode: str = "unlock", stored_hash: str = DEFAULT_PASSWORD_HASH):
+        super().__init__(parent)
+        self.setWindowTitle("Autenticação" if mode == "unlock" else "Alterar Senha")
+        self.setFixedWidth(320)
+        self._stored_hash = stored_hash
+        self._mode = mode
+        self.setStyleSheet(parent.styleSheet())
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        layout.addWidget(QLabel("Senha:"))
+        self._pwd = QLineEdit()
+        self._pwd.setEchoMode(QLineEdit.EchoMode.Password)
+        self._pwd.setPlaceholderText("Digite a senha")
+        layout.addWidget(self._pwd)
+
+        self._err = QLabel("")
+        self._err.setStyleSheet(f"color:{COLOR['err']};font-size:10px;")
+        layout.addWidget(self._err)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self._validate)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+        self._pwd.returnPressed.connect(self._validate)
+
+    def _validate(self) -> None:
+        entered = self._pwd.text()
+        entered_hash = hashlib.sha256(entered.encode()).hexdigest()
+        if entered_hash == self._stored_hash:
+            self.accept()
+        else:
+            self._err.setText("Senha incorreta.")
+            self._pwd.clear()
+            self._pwd.setFocus()
