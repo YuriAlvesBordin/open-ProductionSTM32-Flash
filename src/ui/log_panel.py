@@ -1,47 +1,39 @@
 from PyQt6.QtWidgets import QTextEdit
-from PyQt6.QtGui import QColor, QTextCharFormat, QTextCursor
-from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont, QTextCursor
+
+
+LEVEL_COLORS = {
+    "info":  "#9cdcfe",
+    "ok":    "#4ec94e",
+    "warn":  "#f0a500",
+    "error": "#f44747",
+}
+
+LEVEL_ICONS = {
+    "info":  "ℹ",
+    "ok":    "✓",
+    "warn":  "⚠",
+    "error": "✗",
+}
 
 
 class LogPanel(QTextEdit):
-    _COLOR_MAP = {
-        "ERROR": "#e05c5c",
-        "WARNING": "#e0a85c",
-        "passed": "#6daa45",
-        "activated": "#6daa45",
-        "connected": "#6daa45",
-        "written": "#6daa45",
-    }
-    _DEFAULT_COLOR = "#cdccca"
-
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setReadOnly(True)
+        self.setFont(QFont("Consolas", 9))
         self.setStyleSheet(
-            "background-color: #1c1b19; "
-            "color: #cdccca; "
-            "font-family: 'Consolas', 'Courier New', monospace; "
-            "font-size: 13px; "
-            "border: 1px solid #393836; "
-            "border-radius: 6px; "
-            "padding: 8px;"
+            "background: #1a1a2e; "
+            "color: #e0e0e0; "
+            "border-radius: 6px;"
         )
+        self.setMinimumHeight(160)
 
-    def append_line(self, text: str) -> None:
-        color = self._DEFAULT_COLOR
-        for keyword, hex_color in self._COLOR_MAP.items():
-            if keyword in text:
-                color = hex_color
-                break
-
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(color))
-
-        cursor = self.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText(text + "\n", fmt)
-        self.setTextCursor(cursor)
-        self.ensureCursorVisible()
+    def append_line(self, message: str, level: str = "info") -> None:
+        color = LEVEL_COLORS.get(level, "#e0e0e0")
+        icon  = LEVEL_ICONS.get(level, "·")
+        self.append(f'<span style="color:{color}">{icon} {message}</span>')
+        self.moveCursor(QTextCursor.MoveOperation.End)
 
     def clear_log(self) -> None:
         self.clear()

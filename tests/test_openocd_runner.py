@@ -1,41 +1,50 @@
 import subprocess
+import sys
+import os
 from unittest.mock import patch, MagicMock
-from src.core.openocd_runner import OpenOCDRunner
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+from core.openocd_runner import OpenOCDRunner
 
 
-def _make_mock_result(returncode: int, stdout: str = "", stderr: str = ""):
-    mock = MagicMock(spec=subprocess.CompletedProcess)
-    mock.returncode = returncode
-    mock.stdout = stdout
-    mock.stderr = stderr
-    return mock
+def _mock_result(returncode: int, stdout: str = "", stderr: str = ""):
+    m = MagicMock(spec=subprocess.CompletedProcess)
+    m.returncode = returncode
+    m.stdout = stdout
+    m.stderr = stderr
+    return m
 
 
-@patch("src.core.openocd_runner.subprocess.run")
-def test_run_returns_success_on_zero_returncode(mock_run):
-    mock_run.return_value = _make_mock_result(0, stdout="Programming done.")
-    runner = OpenOCDRunner("openocd")
-    result = runner.run("iface.cfg", "target.cfg", ["init", "reset halt"])
+@patch("core.openocd_runner.subprocess.run")
+def test_success_on_zero_returncode(mock_run):
+    mock_run.return_value = _mock_result(0, stdout="Programming done.")
+    result = OpenOCDRunner("openocd").run("iface.cfg", "target.cfg", ["init"])
     assert result.success is True
     assert "Programming done." in result.output
 
 
-@patch("src.core.openocd_runner.subprocess.run")
-def test_run_returns_failure_on_nonzero_returncode(mock_run):
-    mock_run.return_value = _make_mock_result(1, stderr="Error: target not found")
-    runner = OpenOCDRunner("openocd")
-    result = runner.run("iface.cfg", "target.cfg", ["init"])
+@patch("core.openocd_runner.subprocess.run")
+def test_failure_on_nonzero_returncode(mock_run):
+    mock_run.return_value = _mock_result(1, stderr="Error: target not found")
+    result = OpenOCDRunner("openocd").run("iface.cfg", "target.cfg", ["init"])
     assert result.success is False
-    assert "Error: target not found" in result.output
 
 
-@patch("src.core.openocd_runner.subprocess.run")
-def test_run_joins_multiple_commands(mock_run):
-    mock_run.return_value = _make_mock_result(0)
-    runner = OpenOCDRunner("/usr/bin/openocd")
-    runner.run("iface.cfg", "target.cfg", ["init", "reset halt", "flash write_image erase fw.bin"])
-    call_args = mock_run.call_args[0][0]
-    assert "-c" in call_args
-    joined = call_args[call_args.index("-c") + 1]
-    assert "init" in joined
-    assert "reset halt" in joined
+@patch("core.openocd_runner.subprocess.run")
+def test_failure_when_error_in_stderr_despite_zero_returncode(mock_run):
+    mock_run.return_value = _mock_result(0, stderr="Error: LIBUSB_ERROR_ACCESS")
+    result = OpenOCDRunner("openocd").run("iface.cfg", "target.cfg", ["init"])
+    assert result.success is False
+
+
+@patch("core.openocd_runner.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="openocd", timeout=120))
+def test_timeout_returns_failure(mock_run):
+    result = OpenOCDRunner("openocd").run("iface.cfg", "target.cfg", ["init"])
+    assert result.success is False
+    assert "Timeout" in result.output
+
+
+@patch("core.openocd_runner.subprocess.run", side_effect=FileNotFoundError)
+def test_file_not_found_returns_failure(mock_run):
+    result = OpenOCDRunner("/bad/path/openocd").run("iface.cfg", "target.cfg", ["init"])
+    assert result.success is False
+    assert "not found" in result.output

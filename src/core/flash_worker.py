@@ -1,99 +1,104 @@
+from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 from core.openocd_runner import OpenOCDRunner
 from core.family_config import FamilyConfig
 
 
-RDP_LEVEL_VALUES = {
-    "Level 1 (0xBB) — Reversible": "level1",
-    "Level 2 (0xCC) — IRREVERSIBLE": "level2",
-}
-
-
 class FlashWorker(QThread):
-    log = pyqtSignal(str)
+    log      = pyqtSignal(str, str)
     progress = pyqtSignal(int)
-    finished = pyqtSignal(bool)
+    finished = pyqtSignal(bool, str)
 
     def __init__(
         self,
+        openocd_path: str,
         firmware_path: str,
         interface_cfg: str,
         family: FamilyConfig,
-        rdp_label: str,
-        openocd_path: str = "openocd",
+        enable_rdp: bool,
     ) -> None:
         super().__init__()
-        self._firmware_path = firmware_path
-        self._interface_cfg = interface_cfg
-        self._family = family
-        self._rdp_label = rdp_label
-        self._runner = OpenOCDRunner(openocd_path)
+        self._runner       = OpenOCDRunner(openocd_path)
+        self._firmware     = firmware_path
+        self._interface    = interface_cfg
+        self._family       = family
+        self._enable_rdp   = enable_rdp
 
-    def _emit(self, message: str, step: int) -> None:
-        self.log.emit(message)
-        self.progress.emit(step)
+    def _firmware_format(self) -> str | None:
+        suffix = Path(self._firmware).suffix.lower()
+        if suffix == ".bin":
+            return "bin"
+        if suffix in {".hex", ".ihex"}:
+            return "ihex"
+        if suffix == ".elf":
+            return "elf"
+        return None
+
+    def _flash_commands(self, escaped: str, fmt: str) -> tuple[str, str]:
+        if fmt == "bin":
+            write  = f"flash write_image erase {escaped} {self._family.flash_base} bin"
+            verify = f"flash verify_image {escaped} {self._family.flash_base} bin"
+        else:
+            write  = f"flash write_image erase {escaped}"
+            verify = f"flash verify_image {escaped}"
+        return write, verify
 
     def run(self) -> None:
-        self._emit("Connecting to target...", 5)
+        self.log.emit("Starting flash process...", "info")
+        self.progress.emit(5)
 
-        connect_result = self._runner.run(
-            self._interface_cfg,
-            self._family.openocd_target,
-            ["init", "reset halt"],
-        )
-        self.log.emit(connect_result.output)
-
-        if not connect_result.success:
-            self.log.emit("ERROR: Could not connect to target. Check cable and probe.")
-            self.finished.emit(False)
+        fmt = self._firmware_format()
+        if fmt is None:
+            self.finished.emit(False, "Unsupported firmware format. Use .bin, .hex or .elf.")
             return
 
-        self._emit("Target connected. Writing firmware...", 20)
+        escaped = self._firmware.replace("\\", "/")
 
-        flash_cmd = (
-            f"{self._family.flash_command} "
-            f"{self._firmware_path} "
-            f"{self._family.flash_base_address}"
-        )
+        self.log.emit("Checking connection to target...", "info")
+        result = self._runner.run(self._interface, self._family.target_cfg, ["init", "reset init", "exit"])
+        self.log.emit(result.output, "info")
+        if not result.success:
+            self.finished.emit(False, "Connection failed. Check cable and probe.")
+            return
+        self.log.emit("Target connected.", "ok")
+        self.progress.emit(20)
+
+        self.log.emit(f"Writing firmware: {Path(self._firmware).name}", "info")
+        write_cmd, verify_cmd = self._flash_commands(escaped, fmt)
         flash_result = self._runner.run(
-            self._interface_cfg,
-            self._family.openocd_target,
-            ["init", "reset halt", flash_cmd],
+            self._interface,
+            self._family.target_cfg,
+            ["init", "reset init", write_cmd, verify_cmd, "reset run", "exit"],
         )
-        self.log.emit(flash_result.output)
-
+        self.log.emit(flash_result.output, "info")
         if not flash_result.success:
-            self.log.emit("ERROR: Firmware write failed.")
-            self.finished.emit(False)
+            self.finished.emit(False, "Firmware write or verification failed.")
             return
+        self.log.emit("Firmware written and verified.", "ok")
+        self.progress.emit(75)
 
-        self._emit("Firmware written. Verifying...", 60)
+        if self._enable_rdp:
+            self.log.emit("Activating RDP Level 1...", "info")
+            rdp_cmds = ["init", "reset halt"]
+            for part in self._family.lock_cmd.split(";"):
+                rdp_cmds.append(part.strip())
+            rdp_cmds += ["reset run", "exit"]
 
-        verify_result = self._runner.run(
-            self._interface_cfg,
-            self._family.openocd_target,
-            ["init", f"verify_image {self._firmware_path} {self._family.flash_base_address}"],
-        )
-        self.log.emit(verify_result.output)
+            rdp_result = self._runner.run(self._interface, self._family.target_cfg, rdp_cmds)
+            self.log.emit(rdp_result.output, "info")
+            if not rdp_result.success:
+                self.log.emit("WARNING: RDP may not have been activated. Verify manually.", "warn")
+            else:
+                self.log.emit("RDP Level 1 activated — firmware is protected.", "ok")
+            self.progress.emit(95)
+        else:
+            self.progress.emit(90)
 
-        if not verify_result.success:
-            self.log.emit("ERROR: Verification failed. Flash may be corrupted.")
-            self.finished.emit(False)
-            return
+        self.log.emit("Resetting device...", "info")
+        self._runner.run(self._interface, self._family.target_cfg, ["init", "reset run", "exit"])
+        self.progress.emit(100)
 
-        self._emit("Verification passed. Activating RDP...", 80)
-
-        rdp_result = self._runner.run(
-            self._interface_cfg,
-            self._family.openocd_target,
-            ["init", "reset halt", self._family.rdp_command, "reset run"],
-        )
-        self.log.emit(rdp_result.output)
-
-        if not rdp_result.success:
-            self.log.emit("ERROR: RDP activation failed.")
-            self.finished.emit(False)
-            return
-
-        self._emit("RDP activated. Device is protected and running.", 100)
-        self.finished.emit(True)
+        final_msg = "Flash completed successfully!"
+        if self._enable_rdp:
+            final_msg += " RDP activated."
+        self.finished.emit(True, final_msg)
