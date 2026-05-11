@@ -1,6 +1,6 @@
 # STM32 Production Flasher
 
-Desktop GUI for flashing STM32 firmware and configuring Read Protection (RDP) on the production line. Powered by [OpenOCD](https://openocd.org/) under the hood.
+A desktop GUI for flashing STM32 firmware and configuring Read Protection (RDP) on the production line. Powered by [OpenOCD](https://openocd.org/) under the hood.
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.4%2B-green)
@@ -9,15 +9,19 @@ Desktop GUI for flashing STM32 firmware and configuring Read Protection (RDP) on
 
 ---
 
+This project came out of a pretty specific need: flashing hundreds of boards on a production line without relying on proprietary tools or command-line interfaces that non-technical operators would have to memorize. The idea was to wrap OpenOCD in a straightforward UI that anyone can use, while keeping the more sensitive controls (like RDP) accessible but gated.
+
+---
+
 ## What it does
 
-- Connects to the target over SWD/JTAG, erases flash, writes the firmware and verifies it
-- Auto-detects the connected MCU family and debug interface (ST-Link, J-Link, CMSIS-DAP)
+- Connects to the target over SWD/JTAG, erases flash, writes the firmware, and verifies it
+- Auto-detects the connected MCU family and debug probe (ST-Link, J-Link, CMSIS-DAP)
 - Applies the configured RDP level after a successful flash
 - Keeps a timestamped system log and usage statistics
-- Settings (OpenOCD path, RDP level, password) are protected behind an optional password
+- Settings (OpenOCD path, RDP level, password) can be locked behind an optional password
 
-Everything runs in a background thread — the UI stays responsive throughout.
+Everything runs in a background thread so the UI stays usable during the whole process.
 
 ---
 
@@ -25,7 +29,7 @@ Everything runs in a background thread — the UI stays responsive throughout.
 
 ### MCU families
 
-The application passes the target configuration to OpenOCD using the script files that ship with OpenOCD itself — there are no target config files in this repository.
+The app passes target configs straight to OpenOCD using the script files that ship with it — there are no target config files in this repo.
 
 | MCU family | OpenOCD built-in script | Flash driver |
 |---|---|---|
@@ -39,7 +43,7 @@ The application passes the target configuration to OpenOCD using the script file
 
 To add a new family, add one entry to `src/core/family_config.py`. See [`docs/ADDING_FAMILIES.md`](docs/ADDING_FAMILIES.md).
 
-### Debug interfaces
+### Debug probes
 
 | Interface | OpenOCD built-in script |
 |---|---|
@@ -48,7 +52,7 @@ To add a new family, add one entry to `src/core/family_config.py`. See [`docs/AD
 | J-Link | `interface/jlink.cfg` |
 | CMSIS-DAP | `interface/cmsis-dap.cfg` |
 
-All interface scripts are provided by OpenOCD. The application passes them via `-f` on the command line — no files are bundled here.
+All interface scripts come from OpenOCD. The app passes them via `-f` on the command line — nothing is bundled here.
 
 ---
 
@@ -60,9 +64,9 @@ All interface scripts are provided by OpenOCD. The application passes them via `
 
 ---
 
-## Quick Install
+## Installation
 
-The repository ships with installation scripts that handle everything in one step: virtual environment, dependencies, and an optional standalone build.
+The installer scripts handle everything in one shot: virtual environment, dependencies, and an optional standalone build.
 
 ### Windows
 
@@ -73,12 +77,12 @@ install.bat
 ```
 
 The script will:
-1. Verify that Python 3.10+ is available in `PATH` (fails with a clear message if not)
-2. Create a `.venv` virtual environment in the project folder
+1. Check that Python 3.10+ is available in `PATH` (fails with a clear message if not)
+2. Create a `.venv` virtual environment inside the project folder
 3. Install all dependencies from `requirements.txt` (PyQt6)
-4. Ask at the end whether you want to build a standalone `.exe` with Nuitka
+4. Ask whether you want to build a standalone `.exe` with Nuitka
 
-> **Tip — Python not found?**  
+> **Python not found?**  
 > Download from [python.org](https://www.python.org/downloads/) and check **"Add Python to PATH"** during installation.
 
 ### Linux / macOS
@@ -91,23 +95,19 @@ chmod +x install.sh
 ```
 
 The script will:
-1. Locate a compatible Python 3.10+ interpreter (`python3`, `python3.12`, etc.)
-2. Create a `.venv` virtual environment
+1. Find a compatible Python 3.10+ interpreter (`python3`, `python3.12`, etc.)
+2. Create the `.venv`
 3. Install all dependencies
-4. Ask at the end whether you want to build a standalone binary with Nuitka
+4. Ask whether you want to build a standalone binary with Nuitka
 
-> **Tip — Python not found?**  
+> **Python not found?**  
 > `sudo apt install python3` (Debian/Ubuntu) · `brew install python` (macOS)
 
 ### Building a standalone executable (optional)
 
-At the end of either script you will be prompted:
-
-```
+At the end of either script you'll see:
 Build a standalone executable with Nuitka? [y/N]:
-```
-
-Answer **`y`** to compile a self-contained binary that runs without Python installed. Nuitka will be installed automatically inside the virtual environment. The output lands in `dist/`:
+Answer `y` to compile a self-contained binary that runs without Python installed. Nuitka gets installed automatically inside the virtual environment. Output lands in `dist/`:
 
 | Platform | Output file |
 |---|---|
@@ -115,15 +115,15 @@ Answer **`y`** to compile a self-contained binary that runs without Python insta
 | Linux | `dist/STM32Flash` |
 | macOS | `dist/STM32Flash` |
 
-The build bundles the `config/` directory and disables the console window on Windows. It may take a few minutes depending on your machine.
+The build bundles the `config/` directory and hides the console window on Windows. Depending on your machine, it can take a few minutes.
 
-> **Note:** Nuitka requires a C compiler. On Windows this means [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) or MinGW. On Linux/macOS `gcc` or `clang` will work.
+> **Note:** Nuitka needs a C compiler. On Windows that means [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) or MinGW. On Linux/macOS, `gcc` or `clang` will do.
 
 ---
 
 ## Manual installation
 
-If you prefer to manage the environment yourself:
+If you'd rather manage the environment yourself:
 
 ```bash
 git clone https://github.com/YuriAlvesBordin/open-ProductionSTM32-Flash.git
@@ -161,7 +161,7 @@ brew install open-ocd
 pacman -S mingw-w64-x86_64-openocd
 ```
 
-The app auto-detects OpenOCD at startup. If it is not found, set the path manually in **Settings**.
+The app tries to detect OpenOCD automatically on startup. If it can't find it, set the path manually under **Settings**.
 
 ---
 
@@ -177,50 +177,50 @@ python src/main.py
 
 ### Typical workflow
 
-1. Click **Browse** and select the firmware file (`.bin`, `.hex`, or `.elf`)
-2. Click **Detect Device** — the interface and MCU family are filled automatically
+1. Click **Browse** and pick a firmware file (`.bin`, `.hex`, or `.elf`)
+2. Click **Detect Device** — the probe and MCU family fields fill in automatically
 3. Set the RDP level in **Settings** (default: Level 1)
 4. Click **▶ FLASH**
 
-Flash, verify and RDP steps run in sequence. The status bar and log show progress in real time.
+Flash, verify, and RDP steps run in sequence. The status bar and log follow along in real time.
 
 ---
 
-## RDP levels
+## RDP — Read Protection
 
 | Level | Protection | Reversible |
 |---|---|---|
 | 0 | None (factory default) | Yes |
-| 1 | Blocks debug read-out of flash | Yes — but reverting erases the firmware |
+| 1 | Blocks debug read-out of flash | Yes — but reverting wipes the firmware |
 | 2 | Permanently disables all debug access | **Never** |
 
-The app shows a confirmation popup before applying Level 1 or Level 2. See [`docs/RDP_LEVELS.md`](docs/RDP_LEVELS.md) for the full technical reference.
+The app shows a confirmation dialog before applying Level 1 or Level 2 — especially important for Level 2, which is a one-way door. See [`docs/RDP_LEVELS.md`](docs/RDP_LEVELS.md) for the full technical reference.
 
 ---
 
+```bash
 ## Project layout
-
-```
 src/
-  core/
-    device_detector.py   # Auto-detect MCU family and interface via IDCODE probe
-    family_config.py     # MCU family → OpenOCD command mapping
-    flash_worker.py      # QThread: flash + verify + RDP pipeline
-    openocd_runner.py    # subprocess wrapper for OpenOCD
-  ui/
-    main_window.py       # Main window, tabs, device detection UI
-    settings_tab.py      # Password-protected settings, log, stats
-  main.py                # Entry point
+core/
+device_detector.py   # Detect MCU family and probe via IDCODE
+family_config.py     # MCU family → OpenOCD command mapping
+flash_worker.py      # QThread: flash + verify + RDP pipeline
+openocd_runner.py    # subprocess wrapper for OpenOCD
+ui/
+main_window.py       # Main window, tabs, device detection UI
+settings_tab.py      # Password-protected settings, log, stats
+main.py                # Entry point
 config/
-  interfaces/            # Ready-to-use OpenOCD interface configs
+interfaces/            # Ready-to-use OpenOCD interface configs
 docs/
-  ARCHITECTURE.md
-  RDP_LEVELS.md
-  ADDING_FAMILIES.md
+ARCHITECTURE.md
+RDP_LEVELS.md
+ADDING_FAMILIES.md
 tests/
 install.bat              # Windows installer
 install.sh               # Linux / macOS installer
 ```
+
 
 ---
 
