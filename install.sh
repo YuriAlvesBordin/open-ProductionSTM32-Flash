@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# STM32 Flash  —  Installation Script for Linux / macOS
+# open-ProductionSTM32-Flash  —  Installation Script for Linux / macOS
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -17,7 +17,7 @@ warn()  { echo -e "  ${YLW}[!]${RST} $*"; }
 die()   { echo -e "  ${RED}[✗]${RST} $*" >&2; exit 1; }
 
 echo
-echo -e "${BLD}  STM32 Flash — Installation Script${RST}"
+echo -e "${BLD}  open-ProductionSTM32-Flash — Installation Script${RST}"
 echo    "  ──────────────────────────────────────────────────────"
 echo
 
@@ -93,7 +93,6 @@ if [ "$UNAME_OS" = "Linux" ] && ! command -v patchelf &>/dev/null; then
     read -r -p "  Install patchelf now? Requires sudo. [y/N]: " INSTALL_PATCHELF
     case "$INSTALL_PATCHELF" in
         [Yy]|[Yy][Ee][Ss])
-            # Detect package manager
             if command -v apt-get &>/dev/null; then
                 sudo apt-get install -y patchelf
             elif command -v dnf &>/dev/null; then
@@ -124,7 +123,7 @@ echo
 
 EXTRA_FLAGS=""
 if [ "$UNAME_OS" = "Darwin" ]; then
-    EXTRA_FLAGS="--macos-app-name=STM32Flash"
+    EXTRA_FLAGS="--macos-app-name=open-ProductionSTM32-Flash"
 fi
 
 # shellcheck disable=SC2086
@@ -132,7 +131,7 @@ python -m nuitka \
     --onefile \
     --enable-plugin=pyqt6 \
     --output-dir=dist \
-    --output-filename=STM32Flash \
+    --output-filename=open-ProductionSTM32-Flash \
     --include-data-dir=config=config \
     $EXTRA_FLAGS \
     src/main.py
@@ -141,9 +140,9 @@ echo
 ok "Build complete!"
 echo
 echo    "  ──────────────────────────────────────────────────────"
-echo    "  Executable: dist/STM32Flash"
+echo    "  Executable: dist/open-ProductionSTM32-Flash"
 if [ "$UNAME_OS" = "Linux" ]; then
-echo    "  Run: chmod +x dist/STM32Flash && ./dist/STM32Flash"
+echo    "  Run: chmod +x dist/open-ProductionSTM32-Flash && ./dist/open-ProductionSTM32-Flash"
 fi
 echo    "  ──────────────────────────────────────────────────────"
 echo

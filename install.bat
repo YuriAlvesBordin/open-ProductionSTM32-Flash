@@ -1,17 +1,18 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-title STM32 Flash - Setup
+title open-ProductionSTM32-Flash - Setup
 chcp 65001 >nul
 
 echo.
-echo  ███████╣███╗   ███╗    ██████╗ ██╗      █████╗ ███████╣██╗  ██╗
-echo  ██╔════╝████╗ ████║    ██╔════╝ ██║     ██╔══██╗██╔════╝██║  ██║
-echo  ███████╣██╔████╔██║    ██║  ███╗██║     ███████║███████╣███████║
+echo  ███████╣███╗   ███╗    ██████╖ ██╗      █████╖ ███████╣██╗  ██╗
+echo  ██╔════╝████╖ ████║    ██╔════╝ ██║     ██╔══██╖██╔════╝██║  ██║
+echo  ███████╣██╔████╔██║    ██║  ███╖██║     ███████║███████╣███████║
 echo  ╚════██╣██║╚██╔╝██║    ██║   ██║██║     ██╔══██║╚════██╣██╔══██║
 echo  ███████║██║ ╚═╝ ██║    ██████╔╝███████╣██║  ██║███████║██║  ██║
 echo  ╚══════╝╚═╝     ╚═╝    ╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
 echo.
+echo  open-ProductionSTM32-Flash
 echo  Installation Script for Windows
 echo  ─────────────────────────────────────────────────────────────────
 echo.
@@ -100,7 +101,6 @@ goto :end
 :check_compiler
 set COMPILER_FOUND=0
 
-:: Check for cl.exe (MSVC)
 cl.exe >nul 2>&1
 if not errorlevel 1 (
     set COMPILER_FOUND=1
@@ -108,7 +108,6 @@ if not errorlevel 1 (
     goto :build_nuitka
 )
 
-:: Check for gcc (MinGW / MSYS2)
 gcc --version >nul 2>&1
 if not errorlevel 1 (
     set COMPILER_FOUND=1
@@ -116,7 +115,6 @@ if not errorlevel 1 (
     goto :build_nuitka
 )
 
-:: Check for clang
 clang --version >nul 2>&1
 if not errorlevel 1 (
     set COMPILER_FOUND=1
@@ -124,7 +122,6 @@ if not errorlevel 1 (
     goto :build_nuitka
 )
 
-:: No compiler found
 echo.
 echo  ERROR: No C compiler found. Nuitka requires one to build a standalone executable.
 echo.
@@ -162,11 +159,11 @@ python -m nuitka ^
     --onefile ^
     --enable-plugin=pyqt6 ^
     --windows-console-mode=disable ^
-    --windows-product-name="STM32 Flash" ^
+    --windows-product-name="open-ProductionSTM32-Flash" ^
     --windows-company-name="open-ProductionSTM32-Flash" ^
-    --windows-product-version=1.0.0.0 ^
+    --windows-product-version=0.1.0.0 ^
     --output-dir=dist ^
-    --output-filename=STM32Flash ^
+    --output-filename=open-ProductionSTM32-Flash ^
     --include-data-dir=config=config ^
     src/main.py
 
@@ -179,7 +176,7 @@ if errorlevel 1 (
 echo.
 echo  ─────────────────────────────────────────────────────────────────
 echo  Build complete!
-echo  Executable: dist\STM32Flash.exe
+echo  Executable: dist\open-ProductionSTM32-Flash.exe
 echo  ─────────────────────────────────────────────────────────────────
 
 :end

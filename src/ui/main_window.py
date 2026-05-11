@@ -40,7 +40,7 @@ from core.family_config import get_families, get_interfaces, get_config, get_int
 from core.flash_worker import FlashWorker
 from ui.settings_tab import SettingsTab
 
-# ── palette ───────────────────────────────────────────────────────────────────
+# ── palette ───────────────────────────────────────────────────────────────────────────
 COLOR = {
     "bg":       "#0f0f0f",
     "surface":  "#161616",
@@ -167,7 +167,7 @@ QLabel {{ background: transparent; }}
 """
 
 
-# ── detector thread ───────────────────────────────────────────────────────────
+# ── detector thread ────────────────────────────────────────────────────────────────
 
 class _DetectorThread(QThread):
     progress  = pyqtSignal(str)                    # live status messages
@@ -226,12 +226,12 @@ class _PasswordGateTabBar(QTabBar):
             super().mousePressEvent(event)
 
 
-# ── main window ───────────────────────────────────────────────────────────────
+# ── main window ───────────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("STM32 Flash")
+        self.setWindowTitle("open-ProductionSTM32-Flash")
         self.setMinimumSize(700, 560)
         self._firmware_path = ""
         self._worker: Optional[FlashWorker] = None
@@ -239,7 +239,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(APP_STYLESHEET)
         self._build_ui()
 
-    # ── construction ────────────────────────────────────────────────────────────
+    # ── construction ────────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -256,13 +256,13 @@ class MainWindow(QMainWindow):
         )
         hl = QHBoxLayout(header)
         hl.setContentsMargins(12, 0, 12, 0)
-        title_lbl = QLabel("STM32 FLASH")
+        title_lbl = QLabel("open-ProductionSTM32-Flash")
         title_lbl.setStyleSheet(
             f"color:{COLOR['text']};font-size:13px;font-weight:bold;letter-spacing:2px;"
         )
         hl.addWidget(title_lbl)
         hl.addStretch()
-        ver_lbl = QLabel("v2.0")
+        ver_lbl = QLabel("v0.1")
         ver_lbl.setStyleSheet(f"color:{COLOR['muted']};font-size:10px;")
         hl.addWidget(ver_lbl)
         root.addWidget(header)
@@ -383,7 +383,7 @@ class MainWindow(QMainWindow):
         self._progress.setValue(0)
         layout.addWidget(self._progress)
 
-    # ── device detection ───────────────────────────────────────────────────────
+    # ── device detection ───────────────────────────────────────────────────────────
 
     def _start_device_detect(self) -> None:
         openocd = self._settings_tab.get_openocd_path().strip()
@@ -413,13 +413,11 @@ class MainWindow(QMainWindow):
         self._btn_detect_device.setEnabled(True)
         self._btn_detect_device.setText("Detect Device")
 
-        # Update interface combo
         iface_idx = self._combo_iface.findText(iface)
         if iface_idx >= 0:
             self._combo_iface.setCurrentIndex(iface_idx)
 
         if family:
-            # Full match
             family_idx = self._combo_family.findText(family)
             if family_idx >= 0:
                 self._combo_family.setCurrentIndex(family_idx)
@@ -431,15 +429,13 @@ class MainWindow(QMainWindow):
             self._status.showMessage(msg)
             self._settings_tab.log(msg, "ok")
         else:
-            # IDCODE found but no family match — user must select manually
-            msg = f"Interface: {iface} \u2022 IDCODE 0x{idcode:08X} — family not recognised, select manually"
+            msg = f"Interface: {iface} \u2022 IDCODE 0x{idcode:08X} \u2014 family not recognised, select manually"
             self._lbl_detect_status.setText(msg)
             self._lbl_detect_status.setStyleSheet(
                 f"color:{COLOR['warn']};font-size:10px;font-style:italic;"
             )
             self._status.showMessage(f"Partial detection: IDCODE 0x{idcode:08X}")
             self._settings_tab.log(msg, "warn")
-            # Dump raw OpenOCD output to log so the dev can add the IDCODE to the table
             if raw:
                 for line in raw.splitlines():
                     line = line.strip()
@@ -462,7 +458,7 @@ class MainWindow(QMainWindow):
                 if line:
                     self._settings_tab.log(f"  [raw] {line}", "info")
 
-    # ── helpers ───────────────────────────────────────────────────────────────
+    # ── helpers ───────────────────────────────────────────────────────────────────
 
     def _on_openocd_path_changed(self, path: str) -> None:
         self._status.showMessage(f"OpenOCD: {path}")
@@ -492,7 +488,7 @@ class MainWindow(QMainWindow):
             f"color:{COLOR['muted']};font-size:10px;font-weight:normal;border:none;"
         )
 
-    # ── firmware ──────────────────────────────────────────────────────────────
+    # ── firmware ──────────────────────────────────────────────────────────────────
 
     def _browse_firmware(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -507,7 +503,7 @@ class MainWindow(QMainWindow):
             )
             self._settings_tab.log(f"Firmware selected: {path}", "info")
 
-    # ── flash ────────────────────────────────────────────────────────────────
+    # ── flash ────────────────────────────────────────────────────────────────────
 
     def _start_flash(self) -> None:
         openocd = self._settings_tab.get_openocd_path().strip()
@@ -552,7 +548,7 @@ class MainWindow(QMainWindow):
             self._status.showMessage("Flash failed.")
 
 
-# ── shared helpers ───────────────────────────────────────────────────────────
+# ── shared helpers ────────────────────────────────────────────────────────────────
 
 _OPENOCD_CANDIDATES = [
     r"C:\Program Files\OpenOCD\bin\openocd.exe",
@@ -593,7 +589,7 @@ def _stat_card(label: str, value: str, color: str = "") -> tuple:
     return (container, lbl_val)
 
 
-# ── password dialog ────────────────────────────────────────────────────────────
+# ── password dialog ─────────────────────────────────────────────────────────────
 
 class PasswordDialog(QDialog):
     def __init__(self, parent, stored_hash: str = ""):
