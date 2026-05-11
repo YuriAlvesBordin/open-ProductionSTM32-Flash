@@ -47,11 +47,82 @@ To add a new family, add one entry to `src/core/family_config.py`. See [`docs/AD
 
 ---
 
-## Installation
+## Quick Install
+
+The repository ships with installation scripts that handle everything in one step: virtual environment, dependencies, and an optional standalone build.
+
+### Windows
+
+```bat
+git clone https://github.com/YuriAlvesBordin/open-ProductionSTM32-Flash.git
+cd open-ProductionSTM32-Flash
+install.bat
+```
+
+The script will:
+1. Verify that Python 3.10+ is available in `PATH` (fails with a clear message if not)
+2. Create a `.venv` virtual environment in the project folder
+3. Install all dependencies from `requirements.txt` (PyQt6)
+4. Ask at the end whether you want to build a standalone `.exe` with Nuitka
+
+> **Tip — Python not found?**  
+> Download from [python.org](https://www.python.org/downloads/) and check **"Add Python to PATH"** during installation.
+
+### Linux / macOS
 
 ```bash
 git clone https://github.com/YuriAlvesBordin/open-ProductionSTM32-Flash.git
 cd open-ProductionSTM32-Flash
+chmod +x install.sh
+./install.sh
+```
+
+The script will:
+1. Locate a compatible Python 3.10+ interpreter (`python3`, `python3.12`, etc.)
+2. Create a `.venv` virtual environment
+3. Install all dependencies
+4. Ask at the end whether you want to build a standalone binary with Nuitka
+
+> **Tip — Python not found?**  
+> `sudo apt install python3` (Debian/Ubuntu) · `brew install python` (macOS)
+
+### Building a standalone executable (optional)
+
+At the end of either script you will be prompted:
+
+```
+Build a standalone executable with Nuitka? [y/N]:
+```
+
+Answer **`y`** to compile a self-contained binary that runs without Python installed. Nuitka will be installed automatically inside the virtual environment. The output lands in `dist/`:
+
+| Platform | Output file |
+|---|---|
+| Windows | `dist\STM32Flash.exe` |
+| Linux | `dist/STM32Flash` |
+| macOS | `dist/STM32Flash` |
+
+The build bundles the `config/` directory and disables the console window on Windows. It may take a few minutes depending on your machine.
+
+> **Note:** Nuitka requires a C compiler. On Windows this means [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) or MinGW. On Linux/macOS `gcc` or `clang` will work.
+
+---
+
+## Manual installation
+
+If you prefer to manage the environment yourself:
+
+```bash
+git clone https://github.com/YuriAlvesBordin/open-ProductionSTM32-Flash.git
+cd open-ProductionSTM32-Flash
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# Linux / macOS
+source .venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
@@ -84,6 +155,10 @@ The app auto-detects OpenOCD at startup. If it is not found, set the path manual
 ## Running
 
 ```bash
+# Activate the virtual environment first
+source .venv/bin/activate      # Linux / macOS
+.venv\Scripts\activate          # Windows
+
 python src/main.py
 ```
 
@@ -130,6 +205,8 @@ docs/
   RDP_LEVELS.md
   ADDING_FAMILIES.md
 tests/
+install.bat              # Windows installer
+install.sh               # Linux / macOS installer
 ```
 
 ---
