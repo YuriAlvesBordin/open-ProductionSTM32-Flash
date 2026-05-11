@@ -179,9 +179,15 @@ class _DetectorThread(QThread):
         self._openocd = openocd_path
 
     def run(self) -> None:
+        diagnostics: list[str] = []
+
+        def _progress(msg: str) -> None:
+            diagnostics.append(msg)
+            self.progress.emit(msg)
+
         result = detect_device(
             self._openocd,
-            progress_cb=lambda msg: self.progress.emit(msg),
+            progress_cb=_progress,
         )
         if result:
             self.detected.emit(
@@ -191,7 +197,7 @@ class _DetectorThread(QThread):
                 result.raw_output,
             )
         else:
-            self.not_found.emit("")
+            self.not_found.emit("\n".join(diagnostics))
 
 
 # ── password-gate tab bar ───────────────────────────────────────────────────────
@@ -450,6 +456,11 @@ class MainWindow(QMainWindow):
         )
         self._status.showMessage("Detection failed.")
         self._settings_tab.log(msg, "warn")
+        if raw:
+            for line in raw.splitlines():
+                line = line.strip()
+                if line:
+                    self._settings_tab.log(f"  [raw] {line}", "info")
 
     # ── helpers ───────────────────────────────────────────────────────────────
 

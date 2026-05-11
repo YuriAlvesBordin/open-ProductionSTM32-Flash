@@ -34,13 +34,13 @@ from core.family_config import FAMILY_MAP, INTERFACE_MAP
 # and OpenOCD source (src/flash/nor/stm32*).
 _IDCODE_TABLE: list[tuple[int, int, str]] = [
     # STM32F0 / F1
-    (0x0FFFF000, 0x00006000, "STM32F0/F1"),   # F100
-    (0x0FFFF000, 0x00010000, "STM32F0/F1"),   # F101
-    (0x0FFFF000, 0x00012000, "STM32F0/F1"),   # F102
-    (0x0FFFF000, 0x00014000, "STM32F0/F1"),   # F103
-    (0x0FFFF000, 0x00018000, "STM32F0/F1"),   # F105/F107
-    (0x0FFFF000, 0x00020000, "STM32F0/F1"),   # F0 (410)
-    (0x0FFFF000, 0x00080000, "STM32F0/F1"),   # F0 (411)
+    (0x0FFFF000, 0x00410000, "STM32F0/F1"),   # F101 / F410 device id
+    (0x0FFFF000, 0x00412000, "STM32F0/F1"),   # F102
+    (0x0FFFF000, 0x00414000, "STM32F0/F1"),   # F103
+    (0x0FFFF000, 0x00418000, "STM32F0/F1"),   # F105/F107
+    (0x0FFFF000, 0x00444000, "STM32F0/F1"),   # F03x / F05x
+    (0x0FFFF000, 0x00445000, "STM32F0/F1"),   # F04x / F07x
+    (0x0FFFF000, 0x00446000, "STM32F0/F1"),   # F09x
     # STM32F2 / F4
     (0x0FFFF000, 0x00411000, "STM32F2/F4"),   # F2xx
     (0x0FFFF000, 0x00413000, "STM32F2/F4"),   # F40x / F41x
@@ -108,12 +108,13 @@ _PROBE_SEQUENCE: list[tuple[str, str, str]] = [
 # it, the family lookup will fail and we skip to the next pattern.
 
 _PATTERNS: list[re.Pattern] = [
-    re.compile(r"device\s+id\s*=\s*0x([0-9A-Fa-f]{8})", re.IGNORECASE),
-    re.compile(r"device_id\s*=\s*0x([0-9A-Fa-f]{8})", re.IGNORECASE),
-    re.compile(r"\bchip\s+id\s*[=:]\s*0x([0-9A-Fa-f]{8})", re.IGNORECASE),
-    re.compile(r"tap/device found:\s*0x([0-9A-Fa-f]{8})", re.IGNORECASE),
-    re.compile(r"idcode[:\s]+0x([0-9A-Fa-f]{8})", re.IGNORECASE),
-    re.compile(r"0x([0-9A-Fa-f]{8})\s+\(mfg:", re.IGNORECASE),
+    re.compile(r"device\s+id\s*=\s*0x([0-9A-Fa-f]{3,8})", re.IGNORECASE),
+    re.compile(r"device_id\s*=\s*0x([0-9A-Fa-f]{3,8})", re.IGNORECASE),
+    re.compile(r"\bchip\s+id\s*[=:]\s*0x([0-9A-Fa-f]{3,8})", re.IGNORECASE),
+    re.compile(r"0x[eE]0042000:\s*([0-9A-Fa-f]{3,8})", re.IGNORECASE),
+    re.compile(r"tap/device found:\s*0x([0-9A-Fa-f]{3,8})", re.IGNORECASE),
+    re.compile(r"idcode[:\s]+0x([0-9A-Fa-f]{3,8})", re.IGNORECASE),
+    re.compile(r"0x([0-9A-Fa-f]{3,8})\s+\(mfg:", re.IGNORECASE),
 ]
 
 _SKIP_VALUES = {0x00000000, 0xFFFFFFFF, 0x2BA01477, 0x1BA01477, 0x0BA01477}
@@ -138,12 +139,12 @@ def _parse_idcode(text: str) -> Optional[int]:
     """Return the first MCU device ID found in OpenOCD output, or None."""
     for pattern in _PATTERNS:
         for m in pattern.finditer(text):
-            val = int(m.group(1), 16)
+            raw_val = int(m.group(1), 16)
+            if raw_val in _SKIP_VALUES:
+                continue
+            val = (raw_val & 0x00000FFF) << 12
             if val in _SKIP_VALUES:
                 continue
-            # Only consider values that look like STM32 device IDs:
-            # manufacturer bits [11:1] = 0x20 (ST) → bits[11:1] & 0xFFE = 0x040
-            # We accept anything not in the skip list and try the family match.
             return val
     return None
 
@@ -157,9 +158,28 @@ def _build_args(openocd_path: str, iface_cfg: str, transport: str) -> list[str]:
     return [
         openocd_path,
         "-f", iface_cfg,
+        "-f", "target/swj-dp.tcl",
         "-c", f"transport select {transport}",
         "-c", "adapter speed 1000",
         "-c", "init",
+        "-c", "shutdown",
+    ]
+
+
+def _build_args_with_target(
+    openocd_path: str,
+    iface_cfg: str,
+    target_cfg: str,
+    transport: str,
+) -> list[str]:
+    return [
+        openocd_path,
+        "-f", iface_cfg,
+        "-f", target_cfg,
+        "-c", "adapter speed 1000",
+        "-c", "init",
+        "-c", "reset halt",
+        "-c", "mdw 0xE0042000",
         "-c", "shutdown",
     ]
 
@@ -170,6 +190,27 @@ def _run_probe(openocd_path: str, iface_cfg: str, transport: str,
     try:
         result = subprocess.run(
             _build_args(openocd_path, iface_cfg, transport),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return result.stdout + result.stderr
+    except subprocess.TimeoutExpired:
+        return ""
+    except (FileNotFoundError, OSError):
+        return ""
+
+
+def _run_probe_with_target(
+    openocd_path: str,
+    iface_cfg: str,
+    target_cfg: str,
+    transport: str,
+    timeout: float = 6.0,
+) -> str:
+    try:
+        result = subprocess.run(
+            _build_args_with_target(openocd_path, iface_cfg, target_cfg, transport),
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -198,43 +239,42 @@ def detect_device(
         if progress_cb:
             progress_cb(msg)
 
+    seen_targets: set[str] = set()
+    target_probe_list: list[tuple[str, str]] = []
+    for family_label, family_cfg in FAMILY_MAP.items():
+        if family_cfg.target_cfg in seen_targets:
+            continue
+        seen_targets.add(family_cfg.target_cfg)
+        target_probe_list.append((family_label, family_cfg.target_cfg))
+
     for iface_label, iface_cfg, transport in _PROBE_SEQUENCE:
         _emit(f"Probing {iface_label}...")
 
-        output = _run_probe(openocd_path, iface_cfg, transport)
+        for hinted_family, target_cfg in target_probe_list:
+            output = _run_probe_with_target(openocd_path, iface_cfg, target_cfg, transport)
 
-        if not output:
-            # Timeout or binary not found — skip silently.
-            continue
+            if not output:
+                continue
 
-        idcode = _parse_idcode(output)
+            idcode = _parse_idcode(output)
 
-        if idcode is None:
-            # OpenOCD ran but produced no recognisable device ID.
-            # Log the first meaningful error line to help diagnostics.
-            for line in output.splitlines():
-                line = line.strip()
-                if line and ("Error" in line or "Warn" in line or "failed" in line.lower()):
-                    _emit(f"  {line}")
-                    break
-            continue
+            if idcode is None:
+                for line in output.splitlines():
+                    line = line.strip()
+                    if line and ("Error" in line or "Warn" in line or "failed" in line.lower()):
+                        _emit(f"  {line}")
+                        break
+                continue
 
-        family = _match_family(idcode)
-        if family is None:
-            _emit(f"  IDCODE 0x{idcode:08X} not in table — update device_detector.py")
-            # Still return partial result so the user can set family manually.
+            family = _match_family(idcode)
+            if family is None:
+                continue
+
             return DetectionResult(
                 interface_label=iface_label,
-                family_label="",
+                family_label=family,
                 idcode=idcode,
                 raw_output=output,
             )
-
-        return DetectionResult(
-            interface_label=iface_label,
-            family_label=family,
-            idcode=idcode,
-            raw_output=output,
-        )
 
     return None
