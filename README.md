@@ -56,8 +56,8 @@ stm32-production-flasher/
 │   │   └── openocd_runner.py  # Low-level subprocess wrapper for OpenOCD
 │   ├── ui/
 │   │   ├── main_window.py     # Top-level QWidget: layout and wiring
-│   │   ├── log_panel.py       # Read-only QTextEdit with color-coded output
-│   │   └── settings_dialog.py # OpenOCD path and interface configuration
+│   │   ├── settings_tab.py    # Password-protected settings tab with logs and stats
+│   │   └── log_panel.py       # Legacy log panel (kept for compatibility)
 │   └── main.py                # Entry point: QApplication bootstrap
 ├── config/
 │   └── interfaces/
@@ -92,18 +92,36 @@ stm32-production-flasher/
 ## Installation
 
 ```bash
-git clone https://github.com/YuriAlvesBordin/stm32-production-flasher.git
-cd stm32-production-flasher
+git clone https://github.com/YuriAlvesBordin/open-ProductionSTM32-Flash.git
+cd open-ProductionSTM32-Flash
 pip install -r requirements.txt
 ```
 
-### OpenOCD
+### Installing OpenOCD
 
-| Platform | Command |
-|----------|---------|
-| Ubuntu/Debian | `sudo apt install openocd` |
-| macOS | `brew install openocd` |
-| Windows | Download from [openocd-org/openocd releases](https://github.com/openocd-org/openocd/releases) and add to `PATH` |
+If OpenOCD is not installed on your system, install it using the appropriate command for your platform:
+
+**Debian / Ubuntu**
+```sh
+sudo apt install openocd
+```
+
+**Fedora**
+```sh
+sudo dnf install openocd
+```
+
+**macOS (via Homebrew)**
+```sh
+brew install open-ocd
+```
+
+**Windows (via MSYS2)**
+```sh
+pacman -S mingw-w64-x86_64-openocd
+```
+
+> The application will attempt to auto-detect OpenOCD at startup. If it is not found automatically, set the path manually in the **Settings** tab.
 
 ---
 
@@ -118,8 +136,8 @@ python src/main.py
 1. Click **Browse** and select your firmware file (`.bin`, `.hex`, or `.elf`)
 2. Choose the **MCU Family** from the dropdown
 3. Select the **Interface** (SWD or JTAG)
-4. Select the **RDP Level** (see [`docs/RDP_LEVELS.md`](docs/RDP_LEVELS.md) before choosing Level 2)
-5. Click **Flash + Lock** and monitor the log panel
+4. Toggle **RDP Level 1** if read protection should be enabled after flashing (see [`docs/RDP_LEVELS.md`](docs/RDP_LEVELS.md) before using Level 2)
+5. Click **▶ FLASH** and monitor progress
 
 A green completion message confirms the device is flashed and protected.
 
