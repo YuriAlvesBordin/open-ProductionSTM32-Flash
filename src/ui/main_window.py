@@ -170,9 +170,9 @@ QLabel {{ background: transparent; }}
 # ── detector thread ───────────────────────────────────────────────────────────
 
 class _DetectorThread(QThread):
-    progress  = pyqtSignal(str)          # status messages
-    detected  = pyqtSignal(str, str, int)  # iface_label, family_label, idcode
-    not_found = pyqtSignal()
+    progress  = pyqtSignal(str)                    # live status messages
+    detected  = pyqtSignal(str, str, int, str)     # iface, family, idcode, raw_output
+    not_found = pyqtSignal(str)                    # raw_output for diagnostics
 
     def __init__(self, openocd_path: str):
         super().__init__()
@@ -188,9 +188,10 @@ class _DetectorThread(QThread):
                 result.interface_label,
                 result.family_label,
                 result.idcode,
+                result.raw_output,
             )
         else:
-            self.not_found.emit()
+            self.not_found.emit("")
 
 
 # ── password-gate tab bar ───────────────────────────────────────────────────────
@@ -402,28 +403,44 @@ class MainWindow(QMainWindow):
         self._detector.not_found.connect(self._on_device_not_found)
         self._detector.start()
 
-    def _on_device_detected(self, iface: str, family: str, idcode: int) -> None:
+    def _on_device_detected(self, iface: str, family: str, idcode: int, raw: str) -> None:
         self._btn_detect_device.setEnabled(True)
         self._btn_detect_device.setText("Detect Device")
 
-        # Update combo boxes
+        # Update interface combo
         iface_idx = self._combo_iface.findText(iface)
         if iface_idx >= 0:
             self._combo_iface.setCurrentIndex(iface_idx)
 
-        family_idx = self._combo_family.findText(family)
-        if family_idx >= 0:
-            self._combo_family.setCurrentIndex(family_idx)
+        if family:
+            # Full match
+            family_idx = self._combo_family.findText(family)
+            if family_idx >= 0:
+                self._combo_family.setCurrentIndex(family_idx)
+            msg = f"Detected: {iface} \u2022 {family} (IDCODE 0x{idcode:08X})"
+            self._lbl_detect_status.setText(msg)
+            self._lbl_detect_status.setStyleSheet(
+                f"color:{COLOR['ok']};font-size:10px;font-style:normal;"
+            )
+            self._status.showMessage(msg)
+            self._settings_tab.log(msg, "ok")
+        else:
+            # IDCODE found but no family match — user must select manually
+            msg = f"Interface: {iface} \u2022 IDCODE 0x{idcode:08X} — family not recognised, select manually"
+            self._lbl_detect_status.setText(msg)
+            self._lbl_detect_status.setStyleSheet(
+                f"color:{COLOR['warn']};font-size:10px;font-style:italic;"
+            )
+            self._status.showMessage(f"Partial detection: IDCODE 0x{idcode:08X}")
+            self._settings_tab.log(msg, "warn")
+            # Dump raw OpenOCD output to log so the dev can add the IDCODE to the table
+            if raw:
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if line:
+                        self._settings_tab.log(f"  [raw] {line}", "info")
 
-        msg = f"Detected: {iface} • {family} (IDCODE 0x{idcode:08X})"
-        self._lbl_detect_status.setText(msg)
-        self._lbl_detect_status.setStyleSheet(
-            f"color:{COLOR['ok']};font-size:10px;font-style:normal;"
-        )
-        self._status.showMessage(msg)
-        self._settings_tab.log(msg, "ok")
-
-    def _on_device_not_found(self) -> None:
+    def _on_device_not_found(self, raw: str) -> None:
         self._btn_detect_device.setEnabled(True)
         self._btn_detect_device.setText("Detect Device")
         msg = "No device detected. Check connection and OpenOCD path."
