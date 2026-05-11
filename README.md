@@ -1,6 +1,6 @@
 # STM32 Production Flasher
 
-A desktop GUI tool built with **PyQt6** to automate firmware flashing and **Read Protection (RDP)** activation on STM32 microcontrollers in production environments, using [OpenOCD](https://openocd.org/) as the backend.
+Desktop GUI for flashing STM32 firmware and configuring Read Protection (RDP) on the production line. Powered by [OpenOCD](https://openocd.org/) under the hood.
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.4%2B-green)
@@ -9,83 +9,41 @@ A desktop GUI tool built with **PyQt6** to automate firmware flashing and **Read
 
 ---
 
-## Overview
+## What it does
 
-This tool is designed for **embedded firmware engineers** who need a reliable, repeatable flashing process on the production line. It removes human error by automatically:
+- Connects to the target over SWD/JTAG, erases flash, writes the firmware and verifies it
+- Auto-detects the connected MCU family and debug interface (ST-Link, J-Link, CMSIS-DAP)
+- Applies the configured RDP level after a successful flash
+- Keeps a timestamped system log and usage statistics
+- Settings (OpenOCD path, RDP level, password) are protected behind an optional password
 
-1. Connecting to the target via SWD/JTAG through OpenOCD
-2. Erasing and flashing the firmware binary
-3. Verifying the written data against the source file
-4. Activating the RDP (Read-Out Protection) at the configured level
-5. Resetting the MCU into normal execution
-
-All steps run sequentially in a background thread — the UI stays responsive and the operator always sees exactly what is happening.
+Everything runs in a background thread — the UI stays responsive throughout.
 
 ---
 
-## Screenshots
+## Supported hardware
 
-> _Coming soon — screenshots of the production UI will be added here._
+| MCU family | OpenOCD target config |
+|---|---|
+| STM32F0 / F1 | `target/stm32f1x.cfg` |
+| STM32F2 / F4 | `target/stm32f4x.cfg` |
+| STM32F7 | `target/stm32f7x.cfg` |
+| STM32G0 | `target/stm32g0x.cfg` |
+| STM32G4 / L4 | `target/stm32l4x.cfg` |
+| STM32H7 | `target/stm32h7x.cfg` |
+| STM32L0 / L1 | `target/stm32l0.cfg` |
 
----
+To add a new family, add one entry to `src/core/family_config.py`. See [`docs/ADDING_FAMILIES.md`](docs/ADDING_FAMILIES.md).
 
-## Supported MCU Families
-
-| Family | Flash Command | RDP Command |
-|--------|--------------|-------------|
-| STM32F0 / F1 | `flash write_image erase` | `stm32f1x lock 0` |
-| STM32F2 / F4 | `flash write_image erase` | `stm32f2x lock 0` |
-| STM32F7 | `flash write_image erase` | `stm32f7x lock 0` |
-| STM32G0 | `flash write_image erase` | `stm32l4x lock 0` |
-| STM32G4 / L4 | `flash write_image erase` | `stm32l4x lock 0` |
-| STM32H7 | `flash write_image erase` | `stm32h7x lock 0` |
-| STM32L0 / L1 | `flash write_image erase` | `stm32lx lock 0` |
-
-Adding a new family requires only one entry in `src/core/family_config.py` — no other changes needed.
-
----
-
-## Project Structure
-
-```
-stm32-production-flasher/
-├── src/
-│   ├── core/
-│   │   ├── family_config.py   # MCU family → OpenOCD command mapping
-│   │   ├── flash_worker.py    # QThread: flash + RDP pipeline
-│   │   └── openocd_runner.py  # Low-level subprocess wrapper for OpenOCD
-│   ├── ui/
-│   │   ├── main_window.py     # Top-level QWidget: layout and wiring
-│   │   ├── settings_tab.py    # Password-protected settings tab with logs and stats
-│   │   └── log_panel.py       # Legacy log panel (kept for compatibility)
-│   └── main.py                # Entry point: QApplication bootstrap
-├── config/
-│   └── interfaces/
-│       ├── stlink_swd.cfg     # ST-LINK v2 SWD config (ready to use)
-│       └── jlink_swd.cfg      # J-Link SWD config (ready to use)
-├── docs/
-│   ├── ARCHITECTURE.md        # Component diagram and data-flow description
-│   ├── RDP_LEVELS.md          # RDP Level 0/1/2 explanation and risks
-│   └── ADDING_FAMILIES.md     # Step-by-step guide to add a new MCU family
-├── tests/
-│   ├── test_family_config.py  # Unit tests for family_config lookups
-│   └── test_openocd_runner.py # Unit tests with mocked subprocess
-├── .github/
-│   └── workflows/
-│       └── ci.yml             # GitHub Actions: lint + test on push
-├── .gitignore
-├── pyproject.toml
-├── requirements.txt
-└── LICENSE
-```
+**Debug interfaces:** ST-Link V2, ST-Link V3, J-Link, CMSIS-DAP.
 
 ---
 
 ## Requirements
 
 - Python 3.10+
-- [OpenOCD 0.12+](https://openocd.org/pages/getting-started.html)
-- An ST-Link v2, J-Link, or compatible SWD/JTAG probe
+- OpenOCD 0.12+
+- ST-Link V2/V3, J-Link, or any CMSIS-DAP probe
 
 ---
 
@@ -99,73 +57,91 @@ pip install -r requirements.txt
 
 ### Installing OpenOCD
 
-If OpenOCD is not installed on your system, install it using the appropriate command for your platform:
-
 **Debian / Ubuntu**
-```sh
+```bash
 sudo apt install openocd
 ```
 
 **Fedora**
-```sh
+```bash
 sudo dnf install openocd
 ```
 
-**macOS (via Homebrew)**
-```sh
+**macOS**
+```bash
 brew install open-ocd
 ```
 
-**Windows (via MSYS2)**
-```sh
+**Windows (MSYS2)**
+```bash
 pacman -S mingw-w64-x86_64-openocd
 ```
 
-> The application will attempt to auto-detect OpenOCD at startup. If it is not found automatically, set the path manually in the **Settings** tab.
+The app auto-detects OpenOCD at startup. If it is not found, set the path manually in **Settings**.
 
 ---
 
-## Usage
+## Running
 
 ```bash
 python src/main.py
 ```
 
-### Step-by-step
+### Typical workflow
 
-1. Click **Browse** and select your firmware file (`.bin`, `.hex`, or `.elf`)
-2. Choose the **MCU Family** from the dropdown
-3. Select the **Interface** (SWD or JTAG)
-4. Toggle **RDP Level 1** if read protection should be enabled after flashing (see [`docs/RDP_LEVELS.md`](docs/RDP_LEVELS.md) before using Level 2)
-5. Click **▶ FLASH** and monitor progress
+1. Click **Browse** and select the firmware file (`.bin`, `.hex`, or `.elf`)
+2. Click **Detect Device** — the interface and MCU family are filled automatically
+3. Set the RDP level in **Settings** (default: Level 1)
+4. Click **▶ FLASH**
 
-A green completion message confirms the device is flashed and protected.
+Flash, verify and RDP steps run in sequence. The status bar and log show progress in real time.
 
 ---
 
-## RDP Levels — Quick Reference
+## RDP levels
 
-| Level | Value | Reversible | Effect |
-|-------|-------|------------|--------|
-| 0 | `0xAA` | Yes | No protection (factory default) |
-| 1 | `0xBB` | Yes\* | Blocks debug readout; code still runs normally |
-| 2 | `0xCC` | **Never** | Permanently disables all debug access |
+| Level | Protection | Reversible |
+|---|---|---|
+| 0 | None (factory default) | Yes |
+| 1 | Blocks debug read-out of flash | Yes — but reverting erases the firmware |
+| 2 | Permanently disables all debug access | **Never** |
 
-\* _Level 1 → Level 0 requires a full flash erase (firmware is lost)._
+The app shows a confirmation popup before applying Level 1 or Level 2. See [`docs/RDP_LEVELS.md`](docs/RDP_LEVELS.md) for the full technical reference.
 
-See [`docs/RDP_LEVELS.md`](docs/RDP_LEVELS.md) for the full technical reference.
+---
+
+## Project layout
+
+```
+src/
+  core/
+    device_detector.py   # Auto-detect MCU family and interface via IDCODE probe
+    family_config.py     # MCU family → OpenOCD command mapping
+    flash_worker.py      # QThread: flash + verify + RDP pipeline
+    openocd_runner.py    # subprocess wrapper for OpenOCD
+  ui/
+    main_window.py       # Main window, tabs, device detection UI
+    settings_tab.py      # Password-protected settings, log, stats
+  main.py                # Entry point
+config/
+  interfaces/            # Ready-to-use OpenOCD interface configs
+docs/
+  ARCHITECTURE.md
+  RDP_LEVELS.md
+  ADDING_FAMILIES.md
+tests/
+```
 
 ---
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feat/your-feature`
-3. Commit using [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`
-4. Open a Pull Request against `main`
+1. Fork the repo and create a branch: `git checkout -b feat/your-feature`
+2. Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`
+3. Open a pull request against `main`
 
 ---
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE) for details.
+MIT — see [`LICENSE`](LICENSE).

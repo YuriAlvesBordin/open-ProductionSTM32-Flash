@@ -1,62 +1,39 @@
-# RDP Levels — Technical Reference
+# RDP Levels
 
-Read-Out Protection (RDP) is an STM32 security feature that restricts access to the internal flash memory through the debug port (SWD/JTAG).
+Read-Out Protection (RDP) controls external access to the STM32 flash memory. It is configured via the option bytes and takes effect after a reset.
 
----
+## Level 0 — No protection
 
-## Level 0 — No Protection
+- Factory default (`RDP = 0xAA`).
+- Full debug access. Flash can be read, written, and erased freely.
+- Use only during development.
 
-- **Option byte value:** `0xAA`
-- **Reversible:** Yes
-- **Effect:** Factory default. Flash memory is fully readable via debugger. No restrictions.
-- **When to use:** Development and bring-up only.
+## Level 1 — Read-out protection
 
----
+- Debug access is allowed, but reading flash contents over the debug interface is blocked.
+- The firmware executes normally.
+- **Reversible:** setting RDP back to Level 0 triggers a mass erase — the firmware is lost.
+- Recommended for production when you need to keep the option of re-flashing in the field.
 
-## Level 1 — Read Protection
+## Level 2 — Full debug lock ⚠️
 
-- **Option byte value:** Any value except `0xAA` and `0xCC` (typically `0xBB`)
-- **Reversible:** Yes, but at a cost
-- **Effect:**
-  - Flash and backup SRAM cannot be read or written via the debug port.
-  - Code execution continues normally.
-  - Going back to Level 0 triggers a **mass erase** of the entire flash — firmware is lost.
-- **When to use:** Standard production use. Protects IP while still allowing rework.
+- All debug interfaces (SWD, JTAG) are permanently disabled.
+- **Irreversible:** there is no way to undo Level 2, ever.
+- This level does **not** protect against firmware extraction by decapping or fault injection — it only locks the debug port.
+- Use only when you are certain the device will never need firmware updates or debugging.
 
----
+## Option byte values
 
-## Level 2 — Chip Protection
+| Level | RDP byte | NRDP byte |
+|---|---|---|
+| 0 | `0xAA` | `0x55` |
+| 1 | `0xBB` | `0x44` |
+| 2 | `0xCC` | `0x33` |
 
-- **Option byte value:** `0xCC`
-- **Reversible:** **Never — this is a one-way, permanent operation.**
-- **Effect:**
-  - All debug ports (SWD, JTAG, JTAG-DP) are permanently disabled.
-  - The device cannot be reprogrammed in any way.
-  - ST cannot reverse this, even with physical access to the chip.
-- **When to use:** Highest-security products only. Use only when you are 100% certain the firmware is final and no rework is ever needed.
+Values vary slightly between families (F1, G0/G4/L4, H7). The OpenOCD command used by this tool is family-specific and sourced from the respective ST reference manual.
 
----
+## How this tool applies RDP
 
-## Risk Matrix
+After a successful flash + verify, the tool sends the lock command for the selected level via OpenOCD. The device is then reset. The RDP takes effect immediately after reset — no re-flash is needed.
 
-| Scenario | Level 1 | Level 2 |
-|----------|---------|----------|
-| Firmware bug found after production | Rework possible (mass erase + re-flash) | Device must be scrapped |
-| Attacker with physical access | Cannot read flash via probe | Cannot read flash, cannot re-program |
-| Rework / warranty repair | Possible with mass erase | Impossible |
-
----
-
-## How OpenOCD Activates RDP
-
-This tool uses the family-specific lock command after writing the option bytes:
-
-```tcl
-# Example for STM32F4
-init
-reset halt
-stm32f2x lock 0
-reset run
-```
-
-The MCU resets after the command to apply the new option bytes from its OTP area.
+The app will show a confirmation popup before applying Level 1 or Level 2, describing the exact consequences.

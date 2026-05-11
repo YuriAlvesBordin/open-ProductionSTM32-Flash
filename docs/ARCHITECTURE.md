@@ -1,60 +1,57 @@
 # Architecture
 
-## Component Overview
+## Component diagram
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   MainWindow (UI)                   │
-│                                                     │
-│  ┌─────────────┐  ┌─────────────┐  ┌────────────┐  │
-│  │ OpenOCD path│  │  Combos     │  │ FlashButton│  │
-│  │  + Browse   │  │ Iface/Family│  │ + RDP tog. │  │
-│  └─────────────┘  └─────────────┘  └────────────┘  │
-│  ┌─────────────────────────────────────────────┐    │
-│  │               LogPanel                      │    │
-│  └─────────────────────────────────────────────┘    │
-└──────────────────────────┬──────────────────────────┘
-                           │ spawns
-                           ▼
-          ┌────────────────────────────┐
-          │       FlashWorker          │  ← QThread
-          │  1. init + reset init      │
-          │  2. flash write_image erase│
-          │  3. flash verify_image     │
-          │  4. rdp lock (optional)    │
-          │  5. reset run              │
-          └──────────────┬─────────────┘
-                         │ calls
-                         ▼
-          ┌────────────────────────────┐
-          │      OpenOCDRunner         │  ← subprocess wrapper
-          │  openocd -f iface.cfg      │
-          │          -f target.cfg     │
-          │          -c cmd1           │
-          │          -c cmd2 ...       │
-          └────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                     MainWindow                           │
+│                                                          │
+│  ┌─────────────────────────┐  ┌────────────────────────┐ │
+│  │  FLASH tab              │  │  SETTINGS tab          │ │
+│  │  · Interface / Family   │  │  · OpenOCD path        │ │
+│  │  · Detect Device button │  │  · RDP level selector  │ │
+│  │  · Firmware browser     │  │  · Password management │ │
+│  │  · Statistics cards     │  │  · Timestamped log     │ │
+│  │  · ▶ FLASH button       │  └────────────────────────┘ │
+│  └─────────────────────────┘                             │
+└───────────────────┬──────────────────────────────────────┘
+                    │ spawns
+          ┌─────────┴──────────┐
+          │   _DetectorThread  │  (device auto-detect)
+          │   FlashWorker      │  (flash + RDP pipeline)
+          └─────────┬──────────┘
+                    │ calls
+          ┌─────────┴──────────┐
+          │   OpenOCDRunner    │  subprocess wrapper
+          └────────────────────┘
 ```
 
-## Data Flow
+## Flash pipeline (FlashWorker)
 
-1. The operator sets the OpenOCD path (auto-detected via `shutil.which` on startup), selects the firmware file, MCU family, interface, and toggles the RDP option.
-2. `MainWindow` calls `get_config()` and `get_interface_cfg()` to resolve the `FamilyConfig` and interface `.cfg` path.
-3. A `FlashWorker` is created and started on a background `QThread`.
-4. `FlashWorker` calls `OpenOCDRunner.run()` once per pipeline stage, passing each OpenOCD command as a separate `-c` argument.
-5. Each call emits `log(message, level)` and `progress(value)` signals consumed by `MainWindow`.
-6. `LogPanel` renders colored HTML lines; `QProgressBar` advances in real time.
-7. On `finished(success, message)`, `MainWindow` shows a `QMessageBox` and re-enables the Flash button.
+| Step | OpenOCD command |
+|---|---|
+| 1. Init | `init` + `reset init` |
+| 2. Erase & write | `flash write_image erase <firmware>` |
+| 3. Verify | `flash verify_image <firmware>` |
+| 4. RDP (optional) | family-specific lock command |
+| 5. Reset | `reset run` |
 
-## Why Each Command is a Separate `-c` Argument
+Each step is a separate `-c` argument to avoid quoting issues on Windows and to make the command list easy to read in logs.
 
-OpenOCD's TCL interpreter evaluates each `-c` argument as a separate statement. Passing them individually (instead of joining with `;`) avoids quoting issues on Windows paths and makes the command list easy to inspect in logs.
+## Device detection (device_detector.py)
 
-## Error Detection
+The detector opens a minimal OpenOCD session for each interface in priority order (ST-Link V2 → ST-Link V3 → CMSIS-DAP → J-Link). It reads the 32-bit **IDCODE** register (bits 27–12 identify the die), matches it against a table of ~40 known STM32 part numbers, and returns the matched interface and family labels. The whole probe times out in 5 seconds per interface.
 
-OpenOCD frequently returns exit code `0` even when an error occurs (e.g., USB permission denied, target not responding). `OpenOCDRunner.run()` therefore checks **both** `returncode != 0` **and** `"Error" in stderr` to determine failure — mirroring the behavior of the reference implementation.
+## Threading model
 
-## Threading Model
-
-- All `subprocess.run()` calls run exclusively inside `FlashWorker.run()` on a background thread.
-- Qt signals (`log`, `progress`, `finished`) are the only communication channel between worker and UI — they are thread-safe by design.
+- `subprocess.run()` only runs inside worker threads (`FlashWorker`, `_DetectorThread`) — never on the UI thread.
+- Workers communicate back via Qt signals (`log`, `progress`, `finished`, `detected`) which are thread-safe by design.
 - The UI thread never blocks.
+
+## Error detection
+
+OpenOCD returns exit code `0` even on some failures (USB permission denied, target not responding). `OpenOCDRunner` therefore checks **both** `returncode != 0` **and** `"Error" in stderr` to decide whether a step failed.
+
+## Settings persistence
+
+All settings (OpenOCD path, RDP level, password hash) are stored in `~/.stm32flash/settings.json`. Usage statistics live in `~/.stm32flash/stats.json`. Both files are plain JSON.

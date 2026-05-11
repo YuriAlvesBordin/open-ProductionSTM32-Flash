@@ -1,61 +1,39 @@
 # Adding a New MCU Family
 
-This guide explains how to add support for an MCU family that is not yet listed in the tool.
+All family-specific data lives in `src/core/family_config.py`. Adding support for a new STM32 family is a single-file change.
 
-## Step 1 — Find the OpenOCD target file
+## Steps
 
-OpenOCD ships target configuration files for all major STM32 families. On Linux/macOS, they are usually located at:
+**1. Find the OpenOCD target config**
 
-```
-/usr/share/openocd/scripts/target/
-```
+Look in your OpenOCD installation under `scripts/target/`. Common examples:
+- `stm32wbx.cfg` — STM32WB
+- `stm32u5x.cfg` — STM32U5
+- `stm32c0x.cfg` — STM32C0
 
-On Windows, check:
+**2. Find the RDP commands**
 
-```
-C:\Program Files\OpenOCD\share\openocd\scripts\target\
-```
+Check the ST reference manual (RM) for the option byte register address and the RDP byte values. Cross-reference with the OpenOCD source for the correct TCL command. Most newer families use `stm32l4x option_write`.
 
-Find the `.cfg` file that matches your MCU. Examples:
-- `stm32wbx.cfg` → STM32WB
-- `stm32u5x.cfg` → STM32U5
-
-## Step 2 — Find the RDP lock command
-
-Search the OpenOCD source or documentation for the `lock` command of your target. It follows the pattern:
-
-```tcl
-<family_prefix>x lock <bank_number>
-```
-
-Examples:
-- STM32WB: `stm32wbx lock 0`
-- STM32U5: `stm32l5x lock 0` (uses the same driver)
-
-## Step 3 — Add an entry to `family_config.py`
-
-Open `src/core/family_config.py` and add a new entry to `FAMILY_MAP`:
+**3. Add the entry to FAMILY_MAP**
 
 ```python
 "STM32WB": FamilyConfig(
     label="STM32WB",
-    openocd_target="target/stm32wbx.cfg",
-    flash_command="flash write_image erase",
-    rdp_command="stm32wbx lock 0",
-    flash_base_address="0x08000000",
+    target_cfg="target/stm32wbx.cfg",
+    flash_base="0x08000000",
+    lock_cmd="stm32l4x option_write 0 0x20 0xffffbb00 0xffffffff; stm32l4x option_load 0",
+    unlock_cmd="stm32l4x option_write 0 0x20 0xffffaa00 0xffffffff; stm32l4x option_load 0",
+    read_cmd="stm32l4x option_read 0 0x20",
 ),
 ```
 
-That is all. The new family will appear automatically in the UI dropdown on next launch.
+**4. Add the IDCODE entry to device_detector.py (optional but recommended)**
 
-## Step 4 — Add a test
-
-Add a test case to `tests/test_family_config.py` to verify the new entry:
+This enables auto-detection. Find the part number ID in the ST RM (usually in the *Debug and security* or *Device electronic signature* chapter), then add a line to `_IDCODE_TABLE`:
 
 ```python
-def test_stm32wb_config_values():
-    cfg = get_config("STM32WB")
-    assert "stm32wbx" in cfg.openocd_target
-    assert "stm32wbx lock" in cfg.rdp_command
-    assert cfg.flash_base_address == "0x08000000"
+(0x0FFFF000, 0x00495000, "STM32WB"),  # WB55
 ```
+
+That's it. No other files need to change.
