@@ -1,5 +1,9 @@
+import re
 import subprocess
 from dataclasses import dataclass
+
+# Padrão de erro fatal emitido pelo OpenOCD: linhas que começam com "Error:"
+_ERROR_PATTERN = re.compile(r"^Error:", re.MULTILINE | re.IGNORECASE)
 
 
 @dataclass
@@ -20,7 +24,11 @@ class OpenOCDRunner:
         try:
             result = subprocess.run(args, capture_output=True, text=True, timeout=120)
             output = result.stdout + result.stderr
-            success = result.returncode == 0 and "Error" not in result.stderr
+            # fix: usa regex para detectar linhas "Error:" do OpenOCD,
+            # evitando falso negativo em mensagens que contêm a palavra
+            # "Error" como parte de texto informativo (ex: "Error level: Info").
+            has_error = bool(_ERROR_PATTERN.search(result.stderr))
+            success = result.returncode == 0 and not has_error
             return RunResult(success=success, output=output)
         except subprocess.TimeoutExpired:
             return RunResult(success=False, output="Timeout: OpenOCD took more than 120s")
