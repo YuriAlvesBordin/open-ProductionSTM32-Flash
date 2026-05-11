@@ -6,7 +6,7 @@ from ui.main_window import MainWindow
 def main() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    app.setApplicationName("STM32 Production Flasher")
+    app.setApplicationName("open-ProductionSTM32-Flash")
 
     window = MainWindow()
     window.show()
