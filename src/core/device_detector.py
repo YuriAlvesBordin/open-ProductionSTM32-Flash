@@ -87,11 +87,12 @@ _IDCODE_TABLE: list[tuple[int, int, str]] = [
 # Interface probe order (most common first).
 # Each entry: (interface_label, cfg_file, transport)
 # transport is passed as a -c argument so we don't rely on the cfg default.
+# fix: ST-Link V3 usa stlink-dap.cfg — consistente com INTERFACE_MAP.
 _PROBE_SEQUENCE: list[tuple[str, str, str]] = [
-    ("ST-Link V2",  "interface/stlink.cfg",    "swd"),
-    ("ST-Link V3",  "interface/stlink.cfg",    "swd"),
-    ("CMSIS-DAP",   "interface/cmsis-dap.cfg", "swd"),
-    ("J-Link",      "interface/jlink.cfg",     "swd"),
+    ("ST-Link V2",  "interface/stlink.cfg",     "swd"),
+    ("ST-Link V3",  "interface/stlink-dap.cfg", "swd"),
+    ("CMSIS-DAP",   "interface/cmsis-dap.cfg",  "swd"),
+    ("J-Link",      "interface/jlink.cfg",      "swd"),
 ]
 
 # ── IDCODE patterns emitted by OpenOCD ───────────────────────────────────────
@@ -136,16 +137,21 @@ def _match_family(idcode: int) -> Optional[str]:
 
 
 def _parse_idcode(text: str) -> Optional[int]:
-    """Return the first MCU device ID found in OpenOCD output, or None."""
+    """Return the first MCU device ID found in OpenOCD output, or None.
+
+    OpenOCD already reports the device id in the correct format
+    (e.g. 0x10006413).  No bit-shifting is applied — raw_val is used
+    directly against _IDCODE_TABLE which expects the same format.
+    """
     for pattern in _PATTERNS:
         for m in pattern.finditer(text):
             raw_val = int(m.group(1), 16)
             if raw_val in _SKIP_VALUES:
                 continue
-            val = (raw_val & 0x00000FFF) << 12
-            if val in _SKIP_VALUES:
-                continue
-            return val
+            # fix: uso direto do raw_val sem shift.
+            # O shift anterior `(raw_val & 0x00000FFF) << 12` transformava
+            # 0x10006413 em 0x06413000, que nunca bate com a _IDCODE_TABLE.
+            return raw_val
     return None
 
 

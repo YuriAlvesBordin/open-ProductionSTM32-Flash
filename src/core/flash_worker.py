@@ -47,7 +47,7 @@ class FlashWorker(QThread):
         self.log.emit("Starting flash process...", "info")
         self.progress.emit(5)
 
-        # fix: valida existência do arquivo antes de acionar o OpenOCD
+        # valida existência do arquivo antes de acionar o OpenOCD
         firmware_file = Path(self._firmware)
         if not firmware_file.exists():
             self.finished.emit(
@@ -56,7 +56,7 @@ class FlashWorker(QThread):
             )
             return
 
-        # fix: valida formato
+        # valida formato
         fmt = self._firmware_format()
         if fmt is None:
             self.finished.emit(False, "Unsupported firmware format. Use .bin, .hex or .elf.")
@@ -88,7 +88,9 @@ class FlashWorker(QThread):
         self.progress.emit(75)
 
         if self._enable_rdp:
-            self.log.emit("Activating RDP Level 1...", "info")
+            # fix: mensagens genéricas — FlashWorker recebe apenas enable_rdp:bool
+            # e não conhece o nível exato; evita exibir 'Level 1' de forma hardcoded.
+            self.log.emit("Activating RDP protection...", "info")
             rdp_cmds = ["init", "reset halt"]
             for part in self._family.lock_cmd.split(";"):
                 rdp_cmds.append(part.strip())
@@ -99,7 +101,7 @@ class FlashWorker(QThread):
             if not rdp_result.success:
                 self.log.emit("WARNING: RDP may not have been activated. Verify manually.", "warn")
             else:
-                self.log.emit("RDP Level 1 activated \u2014 firmware is protected.", "ok")
+                self.log.emit("RDP protection activated \u2014 firmware is protected.", "ok")
             self.progress.emit(95)
         else:
             self.progress.emit(90)

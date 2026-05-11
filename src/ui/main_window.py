@@ -40,7 +40,7 @@ from core.family_config import get_families, get_interfaces, get_config, get_int
 from core.flash_worker import FlashWorker
 from ui.settings_tab import SettingsTab
 
-# fix: _OPENOCD_CANDIDATES definido antes da classe para evitar
+# _OPENOCD_CANDIDATES definido antes da classe para evitar
 # dependência de ordem de definição ao ser usado em _auto_detect_openocd
 _OPENOCD_CANDIDATES = [
     r"C:\Program Files\OpenOCD\bin\openocd.exe",
@@ -52,7 +52,7 @@ _OPENOCD_CANDIDATES = [
     "/opt/openocd/bin/openocd",
 ]
 
-# ── palette ────────────────────────────────────────────────────────────────────────────────────
+# ── palette ──────────────────────────────────────────────────────────────────────────────────────
 COLOR = {
     "bg":       "#0f0f0f",
     "surface":  "#161616",
@@ -179,7 +179,7 @@ QLabel {{ background: transparent; }}
 """
 
 
-# ── detector thread ──────────────────────────────────────────────────────────────────────
+# ── detector thread ────────────────────────────────────────────────────────────────────────
 
 class _DetectorThread(QThread):
     progress  = pyqtSignal(str)                    # live status messages
@@ -212,7 +212,7 @@ class _DetectorThread(QThread):
             self.not_found.emit("\n".join(diagnostics))
 
 
-# ── password-gate tab bar ──────────────────────────────────────────────────────────────────
+# ── password-gate tab bar ───────────────────────────────────────────────────────────────────────
 
 class _PasswordGateTabBar(QTabBar):
     SETTINGS_INDEX = 1
@@ -238,7 +238,7 @@ class _PasswordGateTabBar(QTabBar):
             super().mousePressEvent(event)
 
 
-# ── main window ─────────────────────────────────────────────────────────────────────────────
+# ── main window ───────────────────────────────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -251,7 +251,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(APP_STYLESHEET)
         self._build_ui()
 
-    # ── construction ──────────────────────────────────────────────────────────────────────────
+    # ── construction ─────────────────────────────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -395,7 +395,7 @@ class MainWindow(QMainWindow):
         self._progress.setValue(0)
         layout.addWidget(self._progress)
 
-    # ── device detection ──────────────────────────────────────────────────────────────────────
+    # ── device detection ──────────────────────────────────────────────────────────────────────────────
 
     def _start_device_detect(self) -> None:
         openocd = self._settings_tab.get_openocd_path().strip()
@@ -470,7 +470,7 @@ class MainWindow(QMainWindow):
                 if line:
                     self._settings_tab.log(f"  [raw] {line}", "info")
 
-    # ── helpers ─────────────────────────────────────────────────────────────────────────────
+    # ── helpers ───────────────────────────────────────────────────────────────────────────────────
 
     def _on_openocd_path_changed(self, path: str) -> None:
         self._status.showMessage(f"OpenOCD: {path}")
@@ -500,7 +500,7 @@ class MainWindow(QMainWindow):
             f"color:{COLOR['muted']};font-size:10px;font-weight:normal;border:none;"
         )
 
-    # ── firmware ───────────────────────────────────────────────────────────────────────────
+    # ── firmware ───────────────────────────────────────────────────────────────────────────────────
 
     def _browse_firmware(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -515,7 +515,7 @@ class MainWindow(QMainWindow):
             )
             self._settings_tab.log(f"Firmware selected: {path}", "info")
 
-    # ── flash ──────────────────────────────────────────────────────────────────────────────
+    # ── flash ──────────────────────────────────────────────────────────────────────────────────────
 
     def _start_flash(self) -> None:
         openocd = self._settings_tab.get_openocd_path().strip()
@@ -533,16 +533,25 @@ class MainWindow(QMainWindow):
         interface_cfg = get_interface_cfg(self._combo_iface.currentText())
         rdp_level     = self._settings_tab.get_rdp_level()
 
-        # fix: confirmação obrigatória antes de ativar RDP
-        # RDP Level 1 é IRREVERSÍVEL sem apagar o chip inteiro.
+        # fix: mensagem de confirmação usa nível dinâmico e aviso extra para Level 2
         if rdp_level > 0:
+            if rdp_level == 2:
+                extra = (
+                    "<br><br><b style='color:#f85149;'>⚠️ RDP Level 2 is PERMANENT — "
+                    "debug access will be disabled FOREVER and cannot be undone.</b>"
+                )
+            else:
+                extra = (
+                    "<br><br>Reverting to Level 0 requires a full chip erase, "
+                    "which will also erase all firmware."
+                )
             reply = QMessageBox.warning(
                 self,
                 "RDP Activation Warning",
-                "<b>Read-Out Protection (RDP) Level 1 will be activated.</b><br><br>"
-                "This operation is <b>IRREVERSIBLE</b> without performing a full chip erase,"
-                " which will also erase all firmware.<br><br>"
-                "Are you sure you want to continue?",
+                f"<b>Read-Out Protection (RDP) Level {rdp_level} will be activated.</b>"
+                f"<br><br>This operation is <b>IRREVERSIBLE</b> without performing "
+                f"a full chip erase.{extra}"
+                f"<br><br>Are you sure you want to continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -577,7 +586,7 @@ class MainWindow(QMainWindow):
             self._status.showMessage("Flash failed.")
 
 
-# ── shared helpers ─────────────────────────────────────────────────────────────────────────────
+# ── shared helpers ─────────────────────────────────────────────────────────────────────────────────────────
 
 
 def _lbl(text: str, muted: bool = False) -> QLabel:
@@ -608,7 +617,7 @@ def _stat_card(label: str, value: str, color: str = "") -> tuple:
     return (container, lbl_val)
 
 
-# ── password dialog ─────────────────────────────────────────────────────────────────────────
+# ── password dialog ───────────────────────────────────────────────────────────────────────────────────────
 
 class PasswordDialog(QDialog):
     def __init__(self, parent, stored_hash: str = ""):

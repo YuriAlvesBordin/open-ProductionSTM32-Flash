@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-# ── persistence paths ─────────────────────────────────────────────────────────
+# ── persistence paths ────────────────────────────────────────────────────────────────────
 _CONFIG_DIR  = Path.home() / ".stm32flash"
 _CONFIG_FILE = _CONFIG_DIR / "settings.json"
 _STATS_FILE  = _CONFIG_DIR / "stats.json"
@@ -54,7 +54,7 @@ LEVEL_COLORS = {
     "error": "#f85149",
 }
 
-# ── RDP warning messages ──────────────────────────────────────────────────────
+# ── RDP warning messages ──────────────────────────────────────────────────────────────────
 _RDP_WARNINGS = {
     0: None,   # No protection — no popup needed
     1: (
@@ -66,15 +66,15 @@ _RDP_WARNINGS = {
     2: (
         "RDP Level 2 \u2014 PERMANENT",
         "\u26a0\ufe0f WARNING: RDP Level 2 is PERMANENT and IRREVERSIBLE.\n\n"
-        "Once set, all debug access is permanently disabled and CANNOT be undone — ever.\n\n"
-        "This level does NOT protect against firmware reverse engineering — it only "
+        "Once set, all debug access is permanently disabled and CANNOT be undone \u2014 ever.\n\n"
+        "This level does NOT protect against firmware reverse engineering \u2014 it only "
         "disables debug interfaces.\n\n"
         "Are you absolutely sure you want to continue?"
     ),
 }
 
 
-# ── persistence helpers ───────────────────────────────────────────────────────
+# ── persistence helpers ───────────────────────────────────────────────────────────────────
 
 def _load_config() -> dict:
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -83,7 +83,9 @@ def _load_config() -> dict:
             return json.loads(_CONFIG_FILE.read_text())
         except Exception:
             pass
-    return {"password_hash": DEFAULT_PASSWORD_HASH, "openocd_path": "", "rdp_level": 1}
+    # fix: default rdp_level corrigido de 1 para 0.
+    # Primeira instalação não deve pré-selecionar RDP sem ação explícita do usuário.
+    return {"password_hash": DEFAULT_PASSWORD_HASH, "openocd_path": "", "rdp_level": 0}
 
 
 def _save_config(data: dict) -> None:
@@ -110,7 +112,7 @@ def _timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-# ── SettingsTab ───────────────────────────────────────────────────────────────
+# ── SettingsTab ──────────────────────────────────────────────────────────────────────────────────
 
 class SettingsTab(QWidget):
     """Settings panel: OpenOCD path, RDP level, password management, system log."""
@@ -124,7 +126,7 @@ class SettingsTab(QWidget):
         self._stats  = _load_stats()
         self._build_ui()
 
-    # ── UI ────────────────────────────────────────────────────────────────────
+    # ── UI ─────────────────────────────────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -175,8 +177,8 @@ class SettingsTab(QWidget):
         self._rdp_group = QButtonGroup(self)
         rdp_labels = [
             ("Level 0",  "No protection (factory default)"),
-            ("Level 1",  "Read-out protection (reversible — erase on revert)"),
-            ("Level 2",  "Full debug lock (PERMANENT — irreversible)"),
+            ("Level 1",  "Read-out protection (reversible \u2014 erase on revert)"),
+            ("Level 2",  "Full debug lock (PERMANENT \u2014 irreversible)"),
         ]
         for i, (btn_text, tooltip) in enumerate(rdp_labels):
             rb = QRadioButton(btn_text)
@@ -186,7 +188,7 @@ class SettingsTab(QWidget):
             rdp_btn_row.addWidget(rb)
         rdp_btn_row.addStretch()
 
-        saved_level = self._config.get("rdp_level", 1)
+        saved_level = self._config.get("rdp_level", 0)
         btn = self._rdp_group.button(saved_level)
         if btn:
             btn.setChecked(True)
@@ -244,7 +246,7 @@ class SettingsTab(QWidget):
 
         root.addWidget(grp_log)
 
-    # ── RDP selection ─────────────────────────────────────────────────────────
+    # ── RDP selection ────────────────────────────────────────────────────────────────────────
 
     def _on_rdp_selected(self, level_id: int) -> None:
         warning = _RDP_WARNINGS.get(level_id)
@@ -265,7 +267,7 @@ class SettingsTab(QWidget):
             self.log(f"RDP level set to {level_id}.", "warn")
         else:
             # Revert radio button to previously saved level
-            prev = self._config.get("rdp_level", 1)
+            prev = self._config.get("rdp_level", 0)
             btn = self._rdp_group.button(prev)
             if btn:
                 btn.setChecked(True)
@@ -274,7 +276,7 @@ class SettingsTab(QWidget):
         self._config["rdp_level"] = level
         _save_config(self._config)
 
-    # ── public API ────────────────────────────────────────────────────────────
+    # ── public API ─────────────────────────────────────────────────────────────────────────────────
 
     def log(self, message: str, level: str = "info") -> None:
         """Append a timestamped entry to the system log."""
@@ -303,7 +305,7 @@ class SettingsTab(QWidget):
         return self._config.get("password_hash", "") == hashlib.sha256(b"").hexdigest()
 
     def get_rdp_level(self) -> int:
-        return self._config.get("rdp_level", 1)
+        return self._config.get("rdp_level", 0)
 
     def record_flash(self, success: bool) -> None:
         """Update and persist usage statistics, then refresh Flash tab cards."""
@@ -314,7 +316,7 @@ class SettingsTab(QWidget):
         _save_stats(self._stats)
         self._main.refresh_stats(self._stats)
 
-    # ── private actions ───────────────────────────────────────────────────────
+    # ── private actions ───────────────────────────────────────────────────────────────────────────
 
     def _save_openocd_path(self) -> None:
         path = self._ocd_input.text().strip()
@@ -375,7 +377,7 @@ class SettingsTab(QWidget):
             )
 
 
-# ── module-level helpers ──────────────────────────────────────────────────────
+# ── module-level helpers ────────────────────────────────────────────────────────────────────────
 
 def _lbl(text: str) -> QLabel:
     lbl = QLabel(text)

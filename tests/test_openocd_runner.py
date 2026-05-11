@@ -36,6 +36,21 @@ def test_failure_when_error_in_stderr_despite_zero_returncode(mock_run):
     assert result.success is False
 
 
+@patch("core.openocd_runner.subprocess.run")
+def test_success_when_error_word_in_informational_stderr(mock_run):
+    """'Error' como substring em mensagem informativa NAO deve causar falha.
+
+    A regex ^Error: so bate em linhas que COMECAM com 'Error:'. Mensagens
+    como 'Info: Error level: debug' ou 'No Error occurred' nao devem
+    acionar o flag de falha.
+    """
+    mock_run.return_value = _mock_result(
+        0, stderr="Info: Error level: debug\nProgramming done."
+    )
+    result = OpenOCDRunner("openocd").run("iface.cfg", "target.cfg", ["init"])
+    assert result.success is True
+
+
 @patch("core.openocd_runner.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="openocd", timeout=120))
 def test_timeout_returns_failure(mock_run):
     result = OpenOCDRunner("openocd").run("iface.cfg", "target.cfg", ["init"])

@@ -32,6 +32,16 @@ def test_stm32f4_config_values():
     assert cfg.flash_base == "0x08000000"
 
 
+def test_stm32f7_config_values():
+    """Regression: STM32F7 must use stm32f7x driver, not stm32f2x."""
+    cfg = get_config("STM32F7")
+    assert "stm32f7x.cfg" in cfg.target_cfg
+    assert "stm32f7x lock" in cfg.lock_cmd
+    assert "stm32f7x unlock" in cfg.unlock_cmd
+    assert "stm32f7x" in cfg.read_cmd
+    assert cfg.flash_base == "0x08000000"
+
+
 def test_stm32g0_lock_cmd_has_option_write():
     cfg = get_config("STM32G0")
     assert "option_write" in cfg.lock_cmd
@@ -47,6 +57,12 @@ def test_get_interfaces_returns_list():
 def test_get_interface_cfg_stlink():
     cfg = get_interface_cfg("ST-Link V2")
     assert "stlink" in cfg
+
+
+def test_stlink_v3_uses_dap_cfg():
+    """Regression: ST-Link V3 must use stlink-dap.cfg, not stlink.cfg."""
+    cfg = get_interface_cfg("ST-Link V3")
+    assert "stlink-dap" in cfg
 
 
 def test_get_interface_cfg_raises_on_unknown():
