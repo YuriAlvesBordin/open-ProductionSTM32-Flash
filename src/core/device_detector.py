@@ -57,8 +57,8 @@ _IDCODE_TABLE: list[tuple[int, int, str]] = [
     # STM32F7
     (0x0FFFF000, 0x00451000, "STM32F7"),       # F76x / F77x
     (0x0FFFF000, 0x00452000, "STM32F7"),       # F72x / F73x
-    # STM32G0
-    (0x0FFFF000, 0x00460000, "STM32G0"),       # G07x / G08x
+    # STM32G0 — DBGMCU_IDCODE at 0x40015800 (Cortex-M0+, NOT 0xE0042000)
+    (0x0FFFF000, 0x00460000, "STM32G0"),       # G07x / G08x / G0B0
     (0x0FFFF000, 0x00466000, "STM32G0"),       # G03x / G04x
     (0x0FFFF000, 0x00467000, "STM32G0"),       # G0B1 / G0C1
     # STM32G4 / L4
@@ -93,6 +93,17 @@ _PROBE_SEQUENCE: list[tuple[str, str, str]] = [
     ("J-Link",      "interface/jlink.cfg",      "swd"),
 ]
 
+# ── Per-target DBGMCU_IDCODE address ─────────────────────────────────────────
+# Cortex-M0+ devices (G0, L0) expose DBGMCU at a peripheral address, NOT at
+# the CoreSight ROM-table address 0xE0042000 used by Cortex-M3/M4/M7.
+# Reference: RM0444 (G0) §38.8.1 — DBGMCU_IDCODE at 0x40015800
+#            RM0367 (L0) §27.6.1 — DBGMCU_IDCODE at 0x40015800
+_TARGET_DBGMCU_ADDR: dict[str, str] = {
+    "target/stm32g0x.cfg": "0x40015800",
+    "target/stm32l0.cfg":  "0x40015800",
+}
+_DEFAULT_DBGMCU_ADDR = "0xE0042000"
+
 # ── IDCODE patterns emitted by OpenOCD ───────────────────────────────────────
 # OpenOCD prints the MCU device id in several formats depending on version:
 #
@@ -104,18 +115,18 @@ _PROBE_SEQUENCE: list[tuple[str, str, str]] = [
 #   "idcode: 0x2BA01477"              (SWD DP — ARM DAP, not MCU)
 #   "0x10006413 (mfg: ..."
 #
-# IMPORTANT: the mdw pattern "0xe0042000: XXXXXXXX" prints the value WITHOUT
-# a 0x prefix and always as exactly 8 hex digits.  The previous regex
-# captured only 3-8 chars which missed many valid values; it is now fixed
-# to require exactly 8 hex digits after the colon.
+# IMPORTANT: the mdw pattern prints the value WITHOUT a 0x prefix and always
+# as exactly 8 hex digits.  Matches both 0xE0042000 and 0x40015800 addresses.
 
 _PATTERNS: list[re.Pattern] = [
     # Most reliable: flash-driver "device id" line
     re.compile(r"device\s+id\s*=\s*0x([0-9A-Fa-f]{3,8})", re.IGNORECASE),
     re.compile(r"device_id\s*=\s*0x([0-9A-Fa-f]{3,8})", re.IGNORECASE),
     re.compile(r"\bchip\s+id\s*[=:]\s*0x([0-9A-Fa-f]{3,8})", re.IGNORECASE),
-    # mdw 0xE0042000 dump — value has NO 0x prefix, always 8 hex digits
+    # mdw dump — value has NO 0x prefix, always 8 hex digits
+    # matches both Cortex-M3/M4 (0xE0042000) and Cortex-M0+ (0x40015800)
     re.compile(r"0x[eE]0042000:\s*([0-9A-Fa-f]{8})", re.IGNORECASE),
+    re.compile(r"0x40015800:\s*([0-9A-Fa-f]{8})", re.IGNORECASE),
     # Fallbacks (may capture ARM DAP IDCODE — filtered by _SKIP_VALUES)
     re.compile(r"tap/device found:\s*0x([0-9A-Fa-f]{3,8})", re.IGNORECASE),
     re.compile(r"idcode[:\s]+0x([0-9A-Fa-f]{3,8})", re.IGNORECASE),
@@ -162,7 +173,13 @@ def _build_args_with_target(
     target_cfg: str,
     transport: str,
 ) -> list[str]:
-    """Full probe: loads interface + target cfg, halts, reads DBGMCU register."""
+    """Full probe: loads interface + target cfg, halts, reads DBGMCU register.
+
+    Uses the correct DBGMCU_IDCODE address for each target:
+    - Cortex-M0+ (G0, L0): 0x40015800
+    - All others (Cortex-M3/M4/M7): 0xE0042000
+    """
+    dbgmcu_addr = _TARGET_DBGMCU_ADDR.get(target_cfg, _DEFAULT_DBGMCU_ADDR)
     return [
         openocd_path,
         "-f", iface_cfg,
@@ -170,7 +187,7 @@ def _build_args_with_target(
         "-c", "adapter speed 1000",
         "-c", "init",
         "-c", "reset halt",
-        "-c", "mdw 0xE0042000",
+        "-c", f"mdw {dbgmcu_addr}",
         "-c", "shutdown",
     ]
 
